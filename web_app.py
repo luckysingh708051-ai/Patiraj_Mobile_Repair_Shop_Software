@@ -1,4 +1,5 @@
 import os
+import sys
 import sqlite3
 import hashlib
 import hmac
@@ -6,6 +7,12 @@ import secrets
 import socket
 from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
+
+if hasattr(sys.stdout, 'reconfigure'):
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mobile_repair_manager.db")
 
@@ -1189,7 +1196,7 @@ if __name__ == "__main__":
     local_ip = get_local_ip()
     print("=" * 60)
     print("PATIRAJ MOBILE REPAIR SHOP - WEB SERVER RUNNING")
-    print(f"👉 Windows Browser Link: http://localhost:5000")
-    print(f"👉 Android Mobile Link:  http://{local_ip}:5000")
+    print(f">> Windows Browser Link: http://localhost:5000")
+    print(f">> Android Mobile Link:  http://{local_ip}:5000")
     print("=" * 60)
     app.run(host="0.0.0.0", port=5000, debug=False)
