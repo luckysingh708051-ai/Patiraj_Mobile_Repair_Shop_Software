@@ -723,34 +723,83 @@ class RepairManager:
             self.lock_screen(reason="Logged out successfully.")
 
     def show_web_links_dialog(self):
-        """Displays Windows Browser link & Android Mobile link with automatic web server starter."""
+        """Displays Windows Browser link & Android Mobile link with automatic web server starter and diagnostics."""
         import socket
         import webbrowser
         import threading
+        import subprocess
+        import sys
+
+        def get_best_ip():
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.settimeout(0.5)
+                s.connect(('8.8.8.8', 80))
+                ip = s.getsockname()[0]
+                s.close()
+                if ip and not ip.startswith('127.'):
+                    return ip
+            except Exception:
+                pass
+            try:
+                hostname = socket.gethostname()
+                ip = socket.gethostbyname(hostname)
+                if ip and not ip.startswith('127.'):
+                    return ip
+            except Exception:
+                pass
+            try:
+                for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+                    cand = info[4][0]
+                    if cand and not cand.startswith('127.'):
+                        return cand
+            except Exception:
+                pass
+            return '127.0.0.1'
+
+        def is_server_listening(port=5000):
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                s.settimeout(0.4)
+                return s.connect_ex(('127.0.0.1', port)) == 0
+            except Exception:
+                return False
+            finally:
+                s.close()
+
+        def is_flask_installed():
+            try:
+                import flask
+                return True
+            except ImportError:
+                return False
+
+        server_error = [None]
 
         def start_bg_server():
             try:
+                # Ensure current directory is in sys.path
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                if base_dir not in sys.path:
+                    sys.path.insert(0, base_dir)
                 import web_app
                 web_app.app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
-            except Exception:
-                pass
+            except Exception as e:
+                server_error[0] = str(e)
 
-        if not getattr(self, "_web_server_started", False):
-            t = threading.Thread(target=start_bg_server, daemon=True)
-            t.start()
-            self._web_server_started = True
+        # Trigger start if not listening
+        if not is_server_listening(5000):
+            if is_flask_installed():
+                t = threading.Thread(target=start_bg_server, daemon=True)
+                t.start()
+                self._web_server_started = True
 
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            s.connect(('8.8.8.8', 80))
-            ip = s.getsockname()[0]
-        except Exception:
-            ip = '127.0.0.1'
-        finally:
-            s.close()
+        ip = get_best_ip()
+        win_url = "http://localhost:5000"
+        mob_url = f"http://{ip}:5000"
 
         win = tk.Toplevel(self.root)
-        win.title("Android & Windows Web Links")
+        win.title("Android & Windows Web Links - Server Manager")
         win.configure(bg=BG)
         win.resizable(False, False)
         win.transient(self.root)
@@ -759,29 +808,132 @@ class RepairManager:
         card = tk.Frame(win, bg=CARD, highlightbackground="#cbd5e1", highlightthickness=1, padx=24, pady=20)
         card.pack(fill="both", expand=True, padx=14, pady=14)
 
-        tk.Label(card, text="🌐 Android & Windows Access Links", font=("Segoe UI", 14, "bold"), bg=CARD, fg=TEXT).pack(anchor="w", pady=(0, 4))
-        tk.Label(card, text="Aap is software ko computer browser aur Android phone dono par chala sakte hain:", font=("Segoe UI", 9), bg=CARD, fg=MUTED).pack(anchor="w", pady=(0, 14))
+        tk.Label(card, text="🌐 Mobile & Web Server Manager", font=("Segoe UI", 14, "bold"), bg=CARD, fg=TEXT).pack(anchor="w", pady=(0, 2))
+        tk.Label(card, text="Aap is software ko apne Computer Browser aur Android Mobile dono par chala sakte hain.", font=("Segoe UI", 9), bg=CARD, fg=MUTED).pack(anchor="w", pady=(0, 10))
+
+        # Status Banner
+        status_frame = tk.Frame(card, bg="#f1f5f9", highlightbackground="#cbd5e1", highlightthickness=1, padx=12, pady=8)
+        status_frame.pack(fill="x", pady=(0, 14))
+
+        status_lbl = tk.Label(status_frame, text="🔍 Checking server status...", font=("Segoe UI", 9, "bold"), bg="#f1f5f9", fg=TEXT)
+        status_lbl.pack(side="left")
+
+        action_btn_holder = tk.Frame(status_frame, bg="#f1f5f9")
+        action_btn_holder.pack(side="right")
+
+        def copy_to_clipboard(text, btn, original_label):
+            try:
+                self.root.clipboard_clear()
+                self.root.clipboard_append(text)
+                btn.config(text="✓ Copied!")
+                self.root.after(1500, lambda: btn.config(text=original_label))
+            except Exception:
+                pass
+
+        def install_flask():
+            win_msg = messagebox.askyesno("Install Flask", "Flask library install karne ke liye internet connection zaroori hai.\n\nKya aap Flask abhi install karna chahte hain?", parent=win)
+            if not win_msg:
+                return
+            status_lbl.config(text="⏳ Installing Flask... Please wait...", fg=ACCENT)
+            win.update_idletasks()
+
+            def do_install():
+                try:
+                    res = subprocess.run([sys.executable, "-m", "pip", "install", "flask"], capture_output=True, text=True, timeout=120)
+                    if res.returncode == 0:
+                        self.root.after(0, lambda: [
+                            messagebox.showinfo("Success", "Flask successfully install ho gaya! Ab server start kiya ja raha hai.", parent=win),
+                            start_server_now()
+                        ])
+                    else:
+                        self.root.after(0, lambda: messagebox.showerror("Install Error", f"Flask install nahi ho paya:\n{res.stderr[:300]}", parent=win))
+                except Exception as ex:
+                    self.root.after(0, lambda: messagebox.showerror("Error", f"Command run karne me error: {ex}", parent=win))
+                self.root.after(500, update_status_ui)
+
+            threading.Thread(target=do_install, daemon=True).start()
+
+        def start_server_now():
+            if not is_flask_installed():
+                install_flask()
+                return
+            status_lbl.config(text="⏳ Server starting on port 5000...", fg=ACCENT)
+            win.update_idletasks()
+            t = threading.Thread(target=start_bg_server, daemon=True)
+            t.start()
+            self._web_server_started = True
+            # Check after 1 second
+            self.root.after(1200, update_status_ui)
+
+        def update_status_ui():
+            for w in action_btn_holder.winfo_children():
+                w.destroy()
+
+            listening = is_server_listening(5000)
+            flask_ok = is_flask_installed()
+
+            if listening:
+                status_lbl.config(text="🟢 Web Server RUNNING (Port 5000 Active)", fg=SUCCESS)
+                ttk.Button(action_btn_holder, text="🔄 Check Status", command=update_status_ui).pack(side="left")
+            elif not flask_ok:
+                status_lbl.config(text="🔴 Flask library missing! (Server cannot run)", fg=DANGER)
+                ttk.Button(action_btn_holder, text="📦 Install Flask", command=install_flask).pack(side="left")
+            else:
+                err_text = f" ({server_error[0]})" if server_error[0] else ""
+                status_lbl.config(text=f"🟡 Server Stopped / Starting{err_text}", fg="#d97706")
+                ttk.Button(action_btn_holder, text="🚀 Start Server", command=start_server_now).pack(side="left")
+
+        self.root.after(400, update_status_ui)
 
         # Windows Box
         w_box = tk.Frame(card, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=12, pady=10)
         w_box.pack(fill="x", pady=(0, 10))
-        tk.Label(w_box, text="💻 Windows Browser Link:", font=("Segoe UI", 9, "bold"), bg="#f8fafc", fg=TEXT).pack(anchor="w")
+        tk.Label(w_box, text="💻 Windows Browser Link (Apne computer ke browser ke liye):", font=("Segoe UI", 9, "bold"), bg="#f8fafc", fg=TEXT).pack(anchor="w")
         w_row = tk.Frame(w_box, bg="#f8fafc")
-        w_row.pack(fill="x", pady=(4, 0))
-        tk.Label(w_row, text="http://localhost:5000", font=("Consolas", 11, "bold"), bg="#f8fafc", fg=ACCENT).pack(side="left")
-        ttk.Button(w_row, text="Open in Browser", command=lambda: webbrowser.open("http://localhost:5000")).pack(side="right")
+        w_row.pack(fill="x", pady=(6, 0))
+        tk.Label(w_row, text=win_url, font=("Consolas", 11, "bold"), bg="#f8fafc", fg=ACCENT).pack(side="left")
+
+        def open_browser():
+            if not is_server_listening(5000):
+                if not is_flask_installed():
+                    install_flask()
+                    return
+                start_server_now()
+                self.root.after(1500, lambda: webbrowser.open(win_url))
+            else:
+                webbrowser.open(win_url)
+
+        w_btn_row = tk.Frame(w_row, bg="#f8fafc")
+        w_btn_row.pack(side="right")
+        w_copy_btn = ttk.Button(w_btn_row, text="📋 Copy", command=lambda: copy_to_clipboard(win_url, w_copy_btn, "📋 Copy"))
+        w_copy_btn.pack(side="left", padx=(0, 6))
+        ttk.Button(w_btn_row, text="🌐 Open Browser", command=open_browser).pack(side="left")
 
         # Android Box
         m_box = tk.Frame(card, bg="#f8fafc", highlightbackground="#e2e8f0", highlightthickness=1, padx=12, pady=10)
         m_box.pack(fill="x", pady=(0, 14))
         tk.Label(m_box, text="📱 Android Mobile Link (Phone ke Chrome me kholein):", font=("Segoe UI", 9, "bold"), bg="#f8fafc", fg=TEXT).pack(anchor="w")
         m_row = tk.Frame(m_box, bg="#f8fafc")
-        m_row.pack(fill="x", pady=(4, 0))
-        tk.Label(m_row, text=f"http://{ip}:5000", font=("Consolas", 11, "bold"), bg="#f8fafc", fg=SUCCESS).pack(side="left")
+        m_row.pack(fill="x", pady=(6, 0))
+        tk.Label(m_row, text=mob_url, font=("Consolas", 11, "bold"), bg="#f8fafc", fg=SUCCESS).pack(side="left")
+        m_copy_btn = ttk.Button(m_row, text="📋 Copy Mobile Link", command=lambda: copy_to_clipboard(mob_url, m_copy_btn, "📋 Copy Mobile Link"))
+        m_copy_btn.pack(side="right")
 
-        tk.Label(card, text="💡 Tip: Android phone aur Computer same Wi-Fi / Mobile Hotspot se connect karein.\nAndroid phone me Chrome khol kar 3-dots par tap karein aur 'Add to Home screen' karein.", font=("Segoe UI", 8), bg=CARD, fg=MUTED, justify="left").pack(anchor="w", pady=(0, 14))
+        # Tip Box
+        tip_box = tk.Frame(card, bg="#eff6ff", highlightbackground="#bfdbfe", highlightthickness=1, padx=12, pady=10)
+        tip_box.pack(fill="x", pady=(0, 14))
+        tk.Label(tip_box, text="📱 Mobile Connect Karne Ke 3 Aasan Steps:", font=("Segoe UI", 9, "bold"), bg="#eff6ff", fg="#1e40af").pack(anchor="w")
+        tips_text = (
+            "1. Computer aur Android Phone dono ko SAME Wi-Fi ya Mobile Hotspot se connect karein.\n"
+            "2. Android Phone me Google Chrome kholein aur upar diya gaya Mobile Link daalein.\n"
+            "3. Chrome me top-right (3 dots) par tap karke 'Add to Home screen' karein - ye app ban jayega!\n"
+            "💡 Agar browser me link na khule, to 'start_web_server.bat' file par double click karke chalaayein."
+        )
+        tk.Label(tip_box, text=tips_text, font=("Segoe UI", 8), bg="#eff6ff", fg="#1e3a8a", justify="left").pack(anchor="w", pady=(4, 0))
 
-        ttk.Button(card, text="Close", command=win.destroy).pack(anchor="e")
+        btn_row = tk.Frame(card, bg=CARD)
+        btn_row.pack(fill="x")
+        ttk.Button(btn_row, text="Close", command=win.destroy).pack(side="right")
 
     # =========================================================================
     # MAIN APPLICATION LAYOUT

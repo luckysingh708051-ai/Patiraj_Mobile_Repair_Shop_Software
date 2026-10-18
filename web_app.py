@@ -34,15 +34,37 @@ def verify_pwd(password: str, stored_hash_hex: str, salt_hex: str) -> bool:
         return False
 
 def get_local_ip():
-    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # Method 1: Try UDP socket connect
     try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.settimeout(0.5)
         s.connect(('8.8.8.8', 80))
         ip = s.getsockname()[0]
-    except Exception:
-        ip = '127.0.0.1'
-    finally:
         s.close()
-    return ip
+        if ip and not ip.startswith('127.'):
+            return ip
+    except Exception:
+        pass
+
+    # Method 2: Hostname resolution
+    try:
+        hostname = socket.gethostname()
+        ip = socket.gethostbyname(hostname)
+        if ip and not ip.startswith('127.'):
+            return ip
+    except Exception:
+        pass
+
+    # Method 3: Iterate through socket addrinfo
+    try:
+        for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET):
+            cand = info[4][0]
+            if cand and not cand.startswith('127.'):
+                return cand
+    except Exception:
+        pass
+
+    return '127.0.0.1'
 
 # -----------------------------------------------------------------------------
 # HTML TEMPLATE (Mobile-First for Android & Windows Browser)

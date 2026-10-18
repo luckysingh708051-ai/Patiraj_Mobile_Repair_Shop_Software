@@ -3,9 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# SQLite temp / WAL files
+# SQLite Database & temp files
+*.db
 *.db-wal
 *.db-shm
+backup_*/
 
 # OS generated files
 .DS_Store
@@ -16,3 +18,4 @@ desktop.ini
 .env
 venv/
 env/
+
