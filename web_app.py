@@ -7,7 +7,7 @@ import secrets
 import socket
 import shutil
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, send_file
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, send_file, Response
 
 if hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -178,6 +178,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <meta name="theme-color" content="#1e293b">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Patiraj Repair">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="icon" type="image/svg+xml" href="/static/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icon.svg">
   <title>Patiraj Mobile Repair Shop - Mobile & Web Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -308,6 +312,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <span>PATIRAJ REPAIR SHOP</span>
     </div>
     <div style="display:flex; align-items:center; gap:8px;">
+      <button id="btn-pwa-install" onclick="installPwaApp()" style="display:none; background:linear-gradient(135deg, #2563eb, #8b5cf6); color:#fff; border:none; padding:4px 10px; border-radius:999px; font-size:0.75rem; font-weight:600; cursor:pointer; align-items:center; gap:4px;">📲 Install App</button>
       {% if role == 'admin' %}
       <a href="/api/backup/download" title="Download Database Backup (.db)" style="background:#0f172a; color:#38bdf8; text-decoration:none; padding:4px 10px; border-radius:999px; font-size:0.75rem; border:1px solid var(--border); font-weight:600; display:flex; align-items:center; gap:4px;">💾 Backup</a>
       {% endif %}
@@ -892,6 +897,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     loadDashboardStats();
+
+    // PWA Service Worker & Install Handler
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').catch(() => {});
+    }
+    let deferredInstallPrompt = null;
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      deferredInstallPrompt = e;
+      const btn = document.getElementById('btn-pwa-install');
+      if (btn) btn.style.display = 'inline-flex';
+    });
+    function installPwaApp() {
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        deferredInstallPrompt.userChoice.then(() => {
+          deferredInstallPrompt = null;
+          const btn = document.getElementById('btn-pwa-install');
+          if (btn) btn.style.display = 'none';
+        });
+      } else {
+        alert('App apne phone me install karne ke liye:\\n\\nChrome browser ke top-right me 3-dots (⋮) par tap karein aur "Install app" ya "Add to Home screen" select karein!');
+      }
+    }
   </script>
 </body>
 </html>
@@ -1360,6 +1389,64 @@ def api_backup_upload():
     except Exception as ex:
         return jsonify({"success": False, "error": str(ex)}), 500
 
+@app.route("/manifest.json")
+def manifest():
+    m = {
+        "name": "Patiraj Mobile Repair Shop",
+        "short_name": "Patiraj Repair",
+        "description": "Patiraj Mobile Repair Shop Management Software",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#0f172a",
+        "theme_color": "#1e293b",
+        "orientation": "portrait",
+        "icons": [
+            {
+                "src": "/static/icon.svg",
+                "sizes": "192x192 512x512",
+                "type": "image/svg+xml",
+                "purpose": "any maskable"
+            }
+        ]
+    }
+    return jsonify(m)
+
+@app.route("/sw.js")
+def service_worker():
+    sw_code = """
+self.addEventListener('install', (e) => {
+  self.skipWaiting();
+});
+self.addEventListener('activate', (e) => {
+  return self.clients.claim();
+});
+self.addEventListener('fetch', (e) => {
+  // Let network handle all dynamic requests
+});
+"""
+    return Response(sw_code, mimetype="application/javascript")
+
+@app.route("/static/icon.svg")
+def app_icon():
+    svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1e3a8a"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <linearGradient id="acc" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3b82f6"/>
+      <stop offset="100%" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="url(#bg)"/>
+  <rect x="136" y="80" width="240" height="352" rx="36" fill="none" stroke="url(#acc)" stroke-width="24"/>
+  <circle cx="256" cy="380" r="16" fill="#60a5fa"/>
+  <rect x="216" y="110" width="80" height="8" rx="4" fill="#60a5fa"/>
+  <!-- Wrench tool in center -->
+  <path d="M 230 190 C 210 180 190 190 180 210 C 172 226 176 244 186 256 L 270 340 C 276 346 286 346 292 340 L 310 322 C 316 316 316 306 310 300 L 226 216 C 238 206 244 196 230 190 Z" fill="#38bdf8"/>
+</svg>"""
+    return Response(svg, mimetype="image/svg+xml")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
