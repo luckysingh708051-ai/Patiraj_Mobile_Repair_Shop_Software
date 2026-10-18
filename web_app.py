@@ -475,6 +475,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <section id="tab-phones" style="display:none;">
       <div class="action-bar">
         <input type="text" id="phones-search" class="search-input" placeholder="🔍 Search repairs by customer, model, IMEI..." oninput="loadPhones()">
+        <button class="btn-primary" onclick="openAddPhoneModal()">➕ New Repair Job</button>
       </div>
       <div class="table-container">
         <table>
@@ -590,6 +591,54 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         <div class="modal-actions">
           <button type="button" class="btn-primary" style="background:#334155;" onclick="closeModal('addPartModal')">Cancel</button>
           <button type="submit" class="btn-primary">Save Part</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Add Phone Repair Modal -->
+  <div class="modal-overlay" id="addPhoneModal" style="display:none;">
+    <div class="modal-card">
+      <div class="modal-hdr">
+        <h3 style="font-size:1.1rem; font-weight:700;">📱 Add New Phone Repair Job</h3>
+        <button onclick="closeModal('addPhoneModal')" style="background:none; border:none; color:var(--muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+      </div>
+      <form onsubmit="submitAddPhone(event)">
+        <div class="form-group">
+          <label>Customer Name:</label>
+          <input type="text" id="phone-cust-name" class="form-control" required placeholder="e.g. Ramesh Kumar">
+        </div>
+        <div class="form-group">
+          <label>Mobile Number:</label>
+          <input type="tel" id="phone-cust-phone" class="form-control" placeholder="10-digit mobile number">
+        </div>
+        <div class="form-group">
+          <label>Device Model:</label>
+          <input type="text" id="phone-device-model" class="form-control" required placeholder="e.g. Vivo Y20 / Samsung M31">
+        </div>
+        <div class="form-group">
+          <label>Problem / Issue:</label>
+          <input type="text" id="phone-problem" class="form-control" placeholder="e.g. Broken Display, Battery Drain, Not Charging">
+        </div>
+        <div class="form-group">
+          <label>Estimated Charge (₹):</label>
+          <input type="number" step="0.01" id="phone-est-charge" class="form-control" placeholder="e.g. 1200" required>
+        </div>
+        <div class="form-group">
+          <label>Repair Cost / Parts Used (₹):</label>
+          <input type="number" step="0.01" id="phone-cost" class="form-control" placeholder="e.g. 600" value="0">
+        </div>
+        <div class="form-group">
+          <label>Status:</label>
+          <select id="phone-status" class="form-control">
+            <option value="Pending">Pending (Received)</option>
+            <option value="In Progress">In Progress (Working)</option>
+            <option value="Delivered">Delivered (Completed)</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-primary" style="background:#334155;" onclick="closeModal('addPhoneModal')">Cancel</button>
+          <button type="submit" class="btn-primary">Save Repair Job</button>
         </div>
       </form>
     </div>
@@ -865,7 +914,45 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     function openAddPartModal() { document.getElementById('addPartModal').style.display = 'flex'; }
+    function openAddPhoneModal() { document.getElementById('addPhoneModal').style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+    async function submitAddPhone(e) {
+      e.preventDefault();
+      const payload = {
+        customer_name: document.getElementById('phone-cust-name').value,
+        customer_phone: document.getElementById('phone-cust-phone').value,
+        phone_model: document.getElementById('phone-device-model').value,
+        problem: document.getElementById('phone-problem').value,
+        estimated_charge: parseFloat(document.getElementById('phone-est-charge').value || 0),
+        repair_cost: parseFloat(document.getElementById('phone-cost').value || 0),
+        status: document.getElementById('phone-status').value
+      };
+      try {
+        const res = await fetch('/api/add_phone', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert('✔ Phone Repair Job saved successfully!');
+          closeModal('addPhoneModal');
+          document.getElementById('phone-cust-name').value = '';
+          document.getElementById('phone-cust-phone').value = '';
+          document.getElementById('phone-device-model').value = '';
+          document.getElementById('phone-problem').value = '';
+          document.getElementById('phone-est-charge').value = '';
+          document.getElementById('phone-cost').value = '0';
+          loadPhones();
+          loadDashboardStats();
+        } else {
+          alert('Error: ' + data.error);
+        }
+      } catch (err) {
+        alert('Network or server error: ' + err);
+      }
+    }
 
     async function submitAddPart(e) {
       e.preventDefault();
@@ -881,18 +968,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         supplier: document.getElementById('part-supplier').value,
         category: ''
       };
-      const res = await fetch('/api/add_part', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('Part added successfully!');
-        closeModal('addPartModal');
-        loadParts();
-      } else {
-        alert('Error: ' + data.error);
+      try {
+        const res = await fetch('/api/add_part', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert('✔ Part added successfully to inventory!');
+          closeModal('addPartModal');
+          loadParts();
+          loadDashboardStats();
+        } else {
+          alert('Error: ' + data.error);
+        }
+      } catch (err) {
+        alert('Network or server error: ' + err);
       }
     }
 
@@ -1255,17 +1347,66 @@ def api_parts():
 @app.route("/api/add_part", methods=["POST"])
 def api_add_part():
     if "user_id" not in session:
-        return jsonify({"error": "Unauthorized"}), 401
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
     data = request.get_json() or {}
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    conn = get_db()
-    conn.execute("""INSERT INTO parts(name, brand, model, compatible_models, category, quantity, low_stock_threshold, purchase_price, selling_price, supplier, notes, created_at, updated_at)
-                    VALUES(?, ?, ?, ?, '', ?, ?, ?, ?, ?, '', ?, ?)""",
-                 (data["name"], data["brand"], data["model"], data.get("compatible_models", ""),
-                  data["quantity"], data["low_stock_threshold"], data["purchase_price"], data["selling_price"], data.get("supplier", ""), now, now))
-    conn.commit()
-    conn.close()
-    return jsonify({"success": True})
+    name = (data.get("name") or "").strip()
+    if not name:
+        return jsonify({"success": False, "error": "Part Name is required"}), 400
+    try:
+        qty = int(data.get("quantity", 0))
+        buy = float(data.get("purchase_price", 0))
+        sell = float(data.get("selling_price", 0))
+        low = int(data.get("low_stock") or data.get("low_stock_threshold", 2))
+        brand = (data.get("brand") or "").strip()
+        model = (data.get("model") or "").strip()
+        comp = (data.get("compatible_models") or "").strip()
+        cat = (data.get("category") or "").strip()
+        sup = (data.get("supplier") or "").strip()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        conn = get_db()
+        conn.execute("""INSERT INTO parts(name, brand, model, compatible_models, category, quantity, purchase_price, selling_price, low_stock, supplier, updated_at)
+                        VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                     (name, brand, model, comp, cat, qty, buy, sell, low, sup, now))
+        new_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        if qty > 0:
+            conn.execute("INSERT INTO stock_history(part_id, action, quantity, note, sale_price, purchase_price, created_at) VALUES(?,?,?,?,?,?,?)",
+                         (new_id, "IN", qty, "Opening stock", sell, buy, now))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True, "id": new_id})
+    except Exception as ex:
+        return jsonify({"success": False, "error": str(ex)}), 500
+
+@app.route("/api/add_phone", methods=["POST"])
+def api_add_phone():
+    if "user_id" not in session:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    data = request.get_json() or {}
+    cust = (data.get("customer_name") or "").strip()
+    phone = (data.get("customer_phone") or data.get("phone_number") or "").strip()
+    model = (data.get("phone_model") or data.get("model") or "").strip()
+    problem = (data.get("problem") or data.get("issue_description") or "").strip()
+    work = (data.get("work_required") or "").strip()
+    chg = float(data.get("estimated_charge") or 0)
+    cost = float(data.get("repair_cost") or 0)
+    status = (data.get("status") or "Pending").strip()
+    rcv_date = data.get("received_date") or datetime.now().strftime("%Y-%m-%d")
+    notes = (data.get("notes") or "").strip()
+
+    if not cust or not model:
+        return jsonify({"success": False, "error": "Customer Name and Device Model are required"}), 400
+
+    try:
+        conn = get_db()
+        conn.execute("""INSERT INTO phones(customer_name, customer_phone, phone_model, problem, work_required, pending_reason, estimated_charge, repair_cost, status, received_date, notes, delivered_date)
+                        VALUES(?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, '')""",
+                     (cust, phone, model, problem, work, chg, cost, status, rcv_date, notes))
+        conn.commit()
+        conn.close()
+        return jsonify({"success": True})
+    except Exception as ex:
+        return jsonify({"success": False, "error": str(ex)}), 500
 
 @app.route("/api/stock_movement", methods=["POST"])
 def api_stock_movement():
