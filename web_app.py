@@ -24,6 +24,106 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
+def hash_password(password: str) -> tuple[str, str]:
+    salt_bytes = secrets.token_bytes(16)
+    hash_bytes = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt_bytes, 200_000)
+    return hash_bytes.hex(), salt_bytes.hex()
+
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("PRAGMA foreign_keys = ON")
+    cur.execute("PRAGMA journal_mode = WAL")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS app_preferences (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT UNIQUE NOT NULL,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'admin',
+        full_name TEXT DEFAULT '',
+        created_at TEXT NOT NULL,
+        last_login TEXT DEFAULT '',
+        is_active INTEGER NOT NULL DEFAULT 1
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp TEXT NOT NULL,
+        user_id INTEGER,
+        username TEXT NOT NULL,
+        action TEXT NOT NULL,
+        entity_type TEXT DEFAULT '',
+        entity_id TEXT DEFAULT '',
+        details TEXT DEFAULT ''
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS parts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        brand TEXT DEFAULT '',
+        model TEXT DEFAULT '',
+        compatible_models TEXT DEFAULT '',
+        category TEXT DEFAULT '',
+        quantity INTEGER NOT NULL DEFAULT 0,
+        purchase_price REAL NOT NULL DEFAULT 0,
+        selling_price REAL NOT NULL DEFAULT 0,
+        low_stock INTEGER NOT NULL DEFAULT 2,
+        supplier TEXT DEFAULT '',
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS stock_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        part_id INTEGER,
+        action TEXT NOT NULL,
+        quantity INTEGER NOT NULL,
+        note TEXT DEFAULT '',
+        sale_price REAL DEFAULT 0,
+        purchase_price REAL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(part_id) REFERENCES parts(id)
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS phones (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_name TEXT NOT NULL,
+        customer_phone TEXT DEFAULT '',
+        phone_model TEXT NOT NULL,
+        problem TEXT DEFAULT '',
+        work_required TEXT DEFAULT '',
+        pending_reason TEXT DEFAULT '',
+        estimated_charge REAL NOT NULL DEFAULT 0,
+        repair_cost REAL NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'Pending',
+        received_date TEXT NOT NULL,
+        notes TEXT DEFAULT '',
+        delivered_date TEXT DEFAULT ''
+    )""")
+
+    # Seed default admin if no users exist
+    user_count = cur.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
+    if user_count == 0:
+        pwd_hash, salt = hash_password("Admin123")
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cur.execute(
+            "INSERT INTO users(username, password_hash, salt, role, full_name, created_at) VALUES(?,?,?,?,?,?)",
+            ("admin", pwd_hash, salt, "admin", "Shop Owner", now)
+        )
+
+    conn.commit()
+    conn.close()
+
+try:
+    init_db()
+except Exception:
+    pass
+
 def verify_pwd(password: str, stored_hash_hex: str, salt_hex: str) -> bool:
     try:
         salt_bytes = bytes.fromhex(salt_hex)
@@ -1081,7 +1181,7 @@ def api_sold_records():
             })
 
     if stype in ("all", "repair"):
-        phone_rows = conn.execute("""SELECT id, customer_name, phone_number, brand, model, estimated_charge, 
+        phone_rows = conn.execute("""SELECT id, customer_name, customer_phone, phone_model, estimated_charge, 
                                             repair_cost, delivered_date, received_date 
                                      FROM phones WHERE status='Delivered' ORDER BY id DESC LIMIT 300""").fetchall()
         for r in phone_rows:
@@ -1092,7 +1192,7 @@ def api_sold_records():
                 "type": "Phone Repair",
                 "datetime": dt,
                 "name": r["customer_name"] or "Customer",
-                "model": f"{r['brand']} {r['model']}".strip(),
+                "model": r["phone_model"] or "-",
                 "quantity": 1,
                 "sale_price": float(charge),
                 "profit": float(charge - cost)
@@ -1177,12 +1277,22 @@ def api_phones():
     conn = get_db()
     if q:
         pat = f"%{q}%"
-        rows = conn.execute("""SELECT * FROM phones WHERE customer_name LIKE ? OR phone_number LIKE ? OR brand LIKE ? OR model LIKE ? OR imei LIKE ? OR issue_description LIKE ? ORDER BY id DESC""",
-                            (pat, pat, pat, pat, pat, pat)).fetchall()
+        rows = conn.execute("""SELECT * FROM phones 
+                               WHERE customer_name LIKE ? OR customer_phone LIKE ? OR phone_model LIKE ? OR problem LIKE ? 
+                               ORDER BY id DESC""",
+                            (pat, pat, pat, pat)).fetchall()
     else:
         rows = conn.execute("SELECT * FROM phones ORDER BY id DESC LIMIT 100").fetchall()
     conn.close()
-    return jsonify([dict(r) for r in rows])
+    result = []
+    for r in rows:
+        d = dict(r)
+        d["phone_number"] = d.get("customer_phone", "")
+        d["brand"] = ""
+        d["model"] = d.get("phone_model", "")
+        d["issue_description"] = d.get("problem", "")
+        result.append(d)
+    return jsonify(result)
 
 @app.route("/api/deliver_phone", methods=["POST"])
 def api_deliver_phone():
@@ -1215,10 +1325,12 @@ def api_history():
     return jsonify([dict(r) for r in rows])
 
 if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 5000))
     local_ip = get_local_ip()
     print("=" * 60)
-    print("PATIRAJ MOBILE REPAIR SHOP - WEB SERVER RUNNING")
-    print(f">> Windows Browser Link: http://localhost:5000")
-    print(f">> Android Mobile Link:  http://{local_ip}:5000")
+    print(f"PATIRAJ MOBILE REPAIR SHOP - WEB SERVER RUNNING ON PORT {port}")
+    print(f">> Browser Link: http://localhost:{port}")
+    print(f">> Mobile Link:  http://{local_ip}:{port}")
     print("=" * 60)
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False)
+
