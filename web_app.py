@@ -359,27 +359,78 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <div class="stat-sub">Total month profit</div>
         </div>
         <div class="stat-card">
+          <div class="stat-label">Total Stock</div>
+          <div class="stat-val" style="color:#c084fc;" id="dash-total-parts">0 Parts</div>
+          <div class="stat-sub" id="dash-total-units">0 units in stock</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Stock Valuation</div>
+          <div class="stat-val" style="color:#38bdf8;" id="dash-stock-value">₹0.00</div>
+          <div class="stat-sub">Total inventory cost</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Pending Repairs</div>
+          <div class="stat-val" style="color:#f43f5e;" id="dash-pending-repairs">0 Phones</div>
+          <div class="stat-sub">Under repair / waiting</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Ready to Deliver</div>
+          <div class="stat-val" style="color:#34d399;" id="dash-ready-repairs">0 Phones</div>
+          <div class="stat-sub">Repaired & waiting</div>
+        </div>
+        <div class="stat-card">
           <div class="stat-label">Low Stock</div>
           <div class="stat-val accent-orange" id="dash-low-stock">0</div>
           <div class="stat-sub">Items need restock</div>
         </div>
       </div>
 
+      <!-- Active / Pending Repairs on Dashboard -->
+      <div class="action-bar" style="margin-top:18px;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <h3 style="font-size:1.05rem; font-weight:700;">⏳ Phones Currently Under Repair</h3>
+          <span id="dash-pending-badge" style="background:rgba(239,68,68,0.2); color:#f87171; padding:3px 10px; border-radius:12px; font-size:0.75rem; font-weight:600;">0 Pending</span>
+        </div>
+        <div style="display:flex; gap:8px;">
+          <button class="btn-primary" onclick="openAddPhoneModal()" style="font-size:0.82rem; padding:7px 12px;">+ New Repair Job</button>
+          <button onclick="loadDashboardStats()" style="background:#334155; color:#fff; border:none; padding:7px 12px; border-radius:8px; font-size:0.82rem; cursor:pointer;">🔄 Refresh</button>
+        </div>
+      </div>
+      <div class="table-container" style="margin-bottom:22px;">
+        <table>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Customer</th>
+              <th>Phone Model</th>
+              <th>Problem</th>
+              <th>Est. Charge</th>
+              <th>Status</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="dash-pending-tbody">
+            <tr><td colspan="7" style="text-align:center; padding:18px; color:var(--muted);">Loading pending repairs...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Sold Items & Repairs Records on Dashboard -->
       <div class="action-bar" style="margin-top:14px;">
-        <h3 style="font-size:1rem; font-weight:600;">📊 Sold Items Records</h3>
+        <h3 style="font-size:1.05rem; font-weight:700;">📊 Sold Items & Completed History</h3>
         <div style="display:flex; gap:6px; flex-wrap:wrap;">
-          <select id="sold-period" class="search-input" style="min-width:110px; padding:6px 8px;" onchange="loadSoldRecords()">
-            <option value="day">By Day / Date</option>
-            <option value="month">By Month</option>
-            <option value="year">By Year</option>
-            <option value="all">All Time</option>
+          <select id="sold-period" class="search-input" style="min-width:115px; padding:6px 8px;" onchange="loadSoldRecords()">
+            <option value="all" selected>All Time</option>
+            <option value="day">Today Only</option>
+            <option value="month">This Month</option>
+            <option value="year">This Year</option>
           </select>
-          <select id="sold-type" class="search-input" style="min-width:110px; padding:6px 8px;" onchange="loadSoldRecords()">
-            <option value="all">All Sales</option>
-            <option value="part">Part Sales</option>
-            <option value="repair">Repairs</option>
+          <select id="sold-type" class="search-input" style="min-width:115px; padding:6px 8px;" onchange="loadSoldRecords()">
+            <option value="all">All Sales & Repairs</option>
+            <option value="part">Part Sales Only</option>
+            <option value="repair">Repairs Only</option>
           </select>
-          <input type="text" id="sold-search" class="search-input" placeholder="🔍 Search sales..." style="min-width:140px; padding:6px 8px;" oninput="filterSoldTable()">
+          <input type="text" id="sold-search" class="search-input" placeholder="🔍 Search records..." style="min-width:140px; padding:6px 8px;" oninput="filterSoldTable()">
         </div>
       </div>
       <div class="table-container">
@@ -673,12 +724,52 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       try {
         const res = await fetch('/api/dashboard_stats');
         const data = await res.json();
-        document.getElementById('dash-today-sale').textContent = '₹' + data.today_sale.toLocaleString('en-IN', {minimumFractionDigits:2});
-        document.getElementById('dash-today-profit').textContent = '₹' + data.today_profit.toLocaleString('en-IN', {minimumFractionDigits:2});
-        document.getElementById('dash-month-profit').textContent = '₹' + data.month_profit.toLocaleString('en-IN', {minimumFractionDigits:2});
-        document.getElementById('dash-low-stock').textContent = data.low_stock_count;
-        loadSoldRecords();
-      } catch (e) { console.error(e); }
+        
+        // Update 8 stats cards
+        document.getElementById('dash-today-sale').textContent = '₹' + Number(data.today_sale || 0).toLocaleString('en-IN', {minimumFractionDigits:2});
+        document.getElementById('dash-today-profit').textContent = '₹' + Number(data.today_profit || 0).toLocaleString('en-IN', {minimumFractionDigits:2});
+        document.getElementById('dash-month-profit').textContent = '₹' + Number(data.month_profit || 0).toLocaleString('en-IN', {minimumFractionDigits:2});
+        
+        document.getElementById('dash-total-parts').textContent = (data.total_parts || 0) + ' Parts';
+        document.getElementById('dash-total-units').textContent = (data.total_units || 0) + ' units in stock';
+        document.getElementById('dash-stock-value').textContent = '₹' + Number(data.stock_value || 0).toLocaleString('en-IN', {minimumFractionDigits:2});
+        
+        document.getElementById('dash-pending-repairs').textContent = (data.pending_repairs || 0) + ' Phones';
+        document.getElementById('dash-ready-repairs').textContent = (data.ready_repairs || 0) + ' Ready';
+        document.getElementById('dash-low-stock').textContent = data.low_stock_count || 0;
+
+        const badge = document.getElementById('dash-pending-badge');
+        if (badge) {
+          badge.textContent = (data.pending_repairs || 0) + ' Pending';
+        }
+
+        renderDashPending(data.pending_phones || []);
+      } catch (e) {
+        console.error('Stats fetch error:', e);
+      }
+      loadSoldRecords();
+    }
+
+    function renderDashPending(phones) {
+      const tbody = document.getElementById('dash-pending-tbody');
+      if (!tbody) return;
+      if (!phones || phones.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; color:var(--muted); padding:18px;">✨ No phones currently under repair. All clear!</td></tr>';
+        return;
+      }
+      tbody.innerHTML = phones.map(p => `
+        <tr>
+          <td>#${p.id}</td>
+          <td><strong>${p.customer_name}</strong>${p.customer_phone ? `<br><span style="font-size:0.75rem; color:var(--muted);">📞 ${p.customer_phone}</span>` : ''}</td>
+          <td><strong>${p.phone_model}</strong></td>
+          <td><span style="color:#94a3b8;">${p.problem || '-'}</span></td>
+          <td><strong style="color:#60a5fa;">₹${Number(p.estimated_charge || 0).toFixed(2)}</strong></td>
+          <td><span style="background:${p.status==='Completed'?'rgba(16,185,129,0.2)':'rgba(245,158,11,0.2)'}; color:${p.status==='Completed'?'#34d399':'#fbbf24'}; padding:3px 8px; border-radius:4px; font-weight:700; font-size:0.75rem;">${p.status}</span></td>
+          <td>
+            <button onclick="deliverPhone(${p.id})" style="background:var(--success); color:#fff; border:none; padding:5px 10px; border-radius:6px; font-size:0.78rem; font-weight:600; cursor:pointer;">🚚 Deliver</button>
+          </td>
+        </tr>
+      `).join('');
     }
 
     async function loadSoldRecords() {
@@ -1241,38 +1332,86 @@ def api_verify_login():
 def api_dashboard_stats():
     if "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
-    conn = get_db()
     today_str = datetime.now().strftime("%Y-%m-%d")
     month_str = datetime.now().strftime("%Y-%m")
 
-    rep_today = conn.execute("""SELECT COALESCE(SUM(estimated_charge),0) s, 
-                                COALESCE(SUM(estimated_charge - COALESCE(repair_cost,0)),0) p 
-                                FROM phones WHERE status='Delivered' AND 
-                                (delivered_date=? OR (delivered_date='' AND received_date=?))""", (today_str, today_str)).fetchone()
-    part_today = conn.execute("""SELECT COALESCE(SUM(h.quantity * CASE WHEN h.sale_price>0 THEN h.sale_price ELSE p.selling_price END),0) s, 
-                                 COALESCE(SUM(h.quantity * ((CASE WHEN h.sale_price>0 THEN h.sale_price ELSE p.selling_price END) - (CASE WHEN h.purchase_price>0 THEN h.purchase_price ELSE p.purchase_price END))),0) p 
-                                 FROM stock_history h LEFT JOIN parts p ON p.id=h.part_id 
-                                 WHERE h.action='OUT' AND substr(h.created_at,1,10)=?""", (today_str,)).fetchone()
+    today_sale = 0.0
+    today_profit = 0.0
+    month_profit = 0.0
+    total_parts = 0
+    total_units = 0
+    stock_value = 0.0
+    pending_repairs = 0
+    ready_repairs = 0
+    low_stock = 0
+    pending_list = []
 
-    rep_month = conn.execute("""SELECT COALESCE(SUM(estimated_charge - COALESCE(repair_cost,0)),0) p 
-                                FROM phones WHERE status='Delivered' AND 
-                                (substr(delivered_date,1,7)=? OR (delivered_date='' AND substr(received_date,1,7)=?))""", (month_str, month_str)).fetchone()
-    part_month = conn.execute("""SELECT COALESCE(SUM(h.quantity * ((CASE WHEN h.sale_price>0 THEN h.sale_price ELSE p.selling_price END) - (CASE WHEN h.purchase_price>0 THEN h.purchase_price ELSE p.purchase_price END))),0) p 
-                                 FROM stock_history h LEFT JOIN parts p ON p.id=h.part_id 
-                                 WHERE h.action='OUT' AND substr(h.created_at,1,7)=?""", (month_str,)).fetchone()
+    try:
+        conn = get_db()
+        rep_today = conn.execute("""SELECT COALESCE(SUM(estimated_charge),0) s, 
+                                    COALESCE(SUM(estimated_charge - COALESCE(repair_cost,0)),0) p 
+                                    FROM phones WHERE status='Delivered' AND 
+                                    (delivered_date=? OR (delivered_date='' AND received_date=?))""", (today_str, today_str)).fetchone()
+        part_today = conn.execute("""SELECT COALESCE(SUM(h.quantity * CASE WHEN h.sale_price>0 THEN h.sale_price ELSE p.selling_price END),0) s, 
+                                     COALESCE(SUM(h.quantity * ((CASE WHEN h.sale_price>0 THEN h.sale_price ELSE p.selling_price END) - (CASE WHEN h.purchase_price>0 THEN h.purchase_price ELSE p.purchase_price END))),0) p 
+                                     FROM stock_history h LEFT JOIN parts p ON p.id=h.part_id 
+                                     WHERE h.action='OUT' AND substr(h.created_at,1,10)=?""", (today_str,)).fetchone()
 
-    low_stock = conn.execute("SELECT COUNT(*) c FROM parts WHERE quantity <= low_stock_threshold").fetchone()["c"]
-    conn.close()
+        rep_month = conn.execute("""SELECT COALESCE(SUM(estimated_charge - COALESCE(repair_cost,0)),0) p 
+                                    FROM phones WHERE status='Delivered' AND 
+                                    (substr(delivered_date,1,7)=? OR (delivered_date='' AND substr(received_date,1,7)=?))""", (month_str, month_str)).fetchone()
+        part_month = conn.execute("""SELECT COALESCE(SUM(h.quantity * ((CASE WHEN h.sale_price>0 THEN h.sale_price ELSE p.selling_price END) - (CASE WHEN h.purchase_price>0 THEN h.purchase_price ELSE p.purchase_price END))),0) p 
+                                     FROM stock_history h LEFT JOIN parts p ON p.id=h.part_id 
+                                     WHERE h.action='OUT' AND substr(h.created_at,1,7)=?""", (month_str,)).fetchone()
 
-    today_sale = (rep_today["s"] or 0) + (part_today["s"] or 0)
-    today_profit = (rep_today["p"] or 0) + (part_today["p"] or 0)
-    month_profit = (rep_month["p"] or 0) + (part_month["p"] or 0)
+        parts_summary = conn.execute("SELECT COUNT(*) c, COALESCE(SUM(quantity),0) q, COALESCE(SUM(quantity * purchase_price),0) v FROM parts").fetchone()
+        if parts_summary:
+            total_parts = parts_summary["c"] or 0
+            total_units = parts_summary["q"] or 0
+            stock_value = parts_summary["v"] or 0.0
+
+        p_row = conn.execute("SELECT COUNT(*) c FROM phones WHERE status NOT IN ('Delivered')").fetchone()
+        pending_repairs = p_row["c"] if p_row else 0
+
+        r_row = conn.execute("SELECT COUNT(*) c FROM phones WHERE status='Completed'").fetchone()
+        ready_repairs = r_row["c"] if r_row else 0
+
+        low_row = conn.execute("SELECT COUNT(*) c FROM parts WHERE quantity <= low_stock").fetchone()
+        low_stock = low_row["c"] if low_row else 0
+
+        pending_rows = conn.execute("""SELECT id, customer_name, customer_phone, phone_model, problem, estimated_charge, status, received_date 
+                                      FROM phones WHERE status NOT IN ('Delivered') ORDER BY id DESC LIMIT 20""").fetchall()
+        for pr in pending_rows:
+            pending_list.append({
+                "id": pr["id"],
+                "customer_name": pr["customer_name"],
+                "customer_phone": pr["customer_phone"] or "",
+                "phone_model": pr["phone_model"],
+                "problem": pr["problem"] or "",
+                "estimated_charge": float(pr["estimated_charge"] or 0),
+                "status": pr["status"] or "Pending",
+                "received_date": pr["received_date"] or ""
+            })
+
+        conn.close()
+
+        today_sale = float((rep_today["s"] if rep_today else 0) + (part_today["s"] if part_today else 0))
+        today_profit = float((rep_today["p"] if rep_today else 0) + (part_today["p"] if part_today else 0))
+        month_profit = float((rep_month["p"] if rep_month else 0) + (part_month["p"] if part_month else 0))
+    except Exception as ex:
+        print("Error in api_dashboard_stats:", ex)
 
     return jsonify({
         "today_sale": float(today_sale),
         "today_profit": float(today_profit),
         "month_profit": float(month_profit),
-        "low_stock_count": int(low_stock)
+        "total_parts": int(total_parts),
+        "total_units": int(total_units),
+        "stock_value": float(stock_value),
+        "pending_repairs": int(pending_repairs),
+        "ready_repairs": int(ready_repairs),
+        "low_stock_count": int(low_stock),
+        "pending_phones": pending_list
     })
 
 @app.route("/api/sold_records")
@@ -1280,52 +1419,69 @@ def api_sold_records():
     if "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
     stype = request.args.get("type", "all")
-    conn = get_db()
+    period = request.args.get("period", "all")
     records = []
 
-    if stype in ("all", "part"):
-        part_rows = conn.execute("""SELECT h.id, h.created_at, h.quantity, h.sale_price, h.purchase_price,
-                                           p.name, p.brand, p.model, p.compatible_models, p.selling_price as p_sell, p.purchase_price as p_buy
-                                    FROM stock_history h LEFT JOIN parts p ON p.id=h.part_id 
-                                    WHERE h.action='OUT' ORDER BY h.id DESC LIMIT 300""").fetchall()
-        for r in part_rows:
-            sell_p = r["sale_price"] if r["sale_price"] > 0 else (r["p_sell"] or 0)
-            buy_p = r["purchase_price"] if r["purchase_price"] > 0 else (r["p_buy"] or 0)
-            qty = r["quantity"]
-            sale_tot = sell_p * qty
-            profit = sale_tot - (buy_p * qty)
-            model_txt = r["model"] or ""
-            if r["compatible_models"]:
-                model_txt += f" [{r['compatible_models']}]" if model_txt else r["compatible_models"]
-            records.append({
-                "type": "Part Sale",
-                "datetime": r["created_at"] or "",
-                "name": r["name"] or "(Deleted Part)",
-                "model": f"{r['brand']} {model_txt}".strip(),
-                "quantity": qty,
-                "sale_price": float(sale_tot),
-                "profit": float(profit)
-            })
+    try:
+        conn = get_db()
+        if stype in ("all", "part"):
+            part_rows = conn.execute("""SELECT h.id, h.created_at, h.quantity, h.sale_price, h.purchase_price,
+                                               p.name, p.brand, p.model, p.compatible_models, p.selling_price as p_sell, p.purchase_price as p_buy
+                                        FROM stock_history h LEFT JOIN parts p ON p.id=h.part_id 
+                                        WHERE h.action='OUT' ORDER BY h.id DESC LIMIT 300""").fetchall()
+            for r in part_rows:
+                sell_p = r["sale_price"] if r["sale_price"] > 0 else (r["p_sell"] or 0)
+                buy_p = r["purchase_price"] if r["purchase_price"] > 0 else (r["p_buy"] or 0)
+                qty = r["quantity"]
+                sale_tot = sell_p * qty
+                profit = sale_tot - (buy_p * qty)
+                model_txt = r["model"] or ""
+                if r["compatible_models"]:
+                    model_txt += f" [{r['compatible_models']}]" if model_txt else r["compatible_models"]
+                records.append({
+                    "type": "Part Sale",
+                    "datetime": r["created_at"] or "",
+                    "name": r["name"] or "(Deleted Part)",
+                    "model": f"{r['brand']} {model_txt}".strip(),
+                    "quantity": qty,
+                    "sale_price": float(sale_tot),
+                    "profit": float(profit)
+                })
 
-    if stype in ("all", "repair"):
-        phone_rows = conn.execute("""SELECT id, customer_name, customer_phone, phone_model, estimated_charge, 
-                                            repair_cost, delivered_date, received_date 
-                                     FROM phones WHERE status='Delivered' ORDER BY id DESC LIMIT 300""").fetchall()
-        for r in phone_rows:
-            dt = r["delivered_date"] or r["received_date"] or ""
-            charge = r["estimated_charge"] or 0
-            cost = r["repair_cost"] or 0
-            records.append({
-                "type": "Phone Repair",
-                "datetime": dt,
-                "name": r["customer_name"] or "Customer",
-                "model": r["phone_model"] or "-",
-                "quantity": 1,
-                "sale_price": float(charge),
-                "profit": float(charge - cost)
-            })
+        if stype in ("all", "repair"):
+            phone_rows = conn.execute("""SELECT id, customer_name, customer_phone, phone_model, estimated_charge, 
+                                                repair_cost, delivered_date, received_date 
+                                         FROM phones WHERE status='Delivered' ORDER BY id DESC LIMIT 300""").fetchall()
+            for r in phone_rows:
+                dt = r["delivered_date"] or r["received_date"] or ""
+                charge = r["estimated_charge"] or 0
+                cost = r["repair_cost"] or 0
+                records.append({
+                    "type": "Phone Repair",
+                    "datetime": dt,
+                    "name": r["customer_name"] or "Customer",
+                    "model": r["phone_model"] or "-",
+                    "quantity": 1,
+                    "sale_price": float(charge),
+                    "profit": float(charge - cost)
+                })
 
-    conn.close()
+        conn.close()
+    except Exception as ex:
+        print("Error in api_sold_records:", ex)
+
+    # Filter by period if requested
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    month_str = datetime.now().strftime("%Y-%m")
+    year_str = datetime.now().strftime("%Y")
+
+    if period == "day":
+        records = [r for r in records if (r.get("datetime") or "").startswith(today_str)]
+    elif period == "month":
+        records = [r for r in records if (r.get("datetime") or "").startswith(month_str)]
+    elif period == "year":
+        records = [r for r in records if (r.get("datetime") or "").startswith(year_str)]
+
     records.sort(key=lambda x: x["datetime"], reverse=True)
     return jsonify(records)
 
