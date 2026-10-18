@@ -5,8 +5,9 @@ import hashlib
 import hmac
 import secrets
 import socket
+import shutil
 from datetime import datetime
-from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for
+from flask import Flask, request, jsonify, render_template_string, session, redirect, url_for, send_file
 
 if hasattr(sys.stdout, 'reconfigure'):
     try:
@@ -306,9 +307,14 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <span class="brand-badge">🔧</span>
       <span>PATIRAJ REPAIR SHOP</span>
     </div>
-    <div class="user-pill">
-      <span>👤 {{ username }}</span>
-      <a href="/logout" class="btn-logout">Exit</a>
+    <div style="display:flex; align-items:center; gap:8px;">
+      {% if role == 'admin' %}
+      <a href="/api/backup/download" title="Download Database Backup (.db)" style="background:#0f172a; color:#38bdf8; text-decoration:none; padding:4px 10px; border-radius:999px; font-size:0.75rem; border:1px solid var(--border); font-weight:600; display:flex; align-items:center; gap:4px;">💾 Backup</a>
+      {% endif %}
+      <div class="user-pill">
+        <span>👤 {{ username }}</span>
+        <a href="/logout" class="btn-logout">Exit</a>
+      </div>
     </div>
   </header>
 
@@ -1323,6 +1329,37 @@ def api_history():
                                ORDER BY h.id DESC LIMIT 200""").fetchall()
     conn.close()
     return jsonify([dict(r) for r in rows])
+
+@app.route("/api/backup/download")
+def api_backup_download():
+    if session.get("role") != "admin":
+        return redirect(url_for("login"))
+    if os.path.exists(DB_FILE):
+        now_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        return send_file(DB_FILE, as_attachment=True, download_name=f"mobile_repair_backup_{now_str}.db")
+    return "Database file not found", 404
+
+@app.route("/api/backup/upload", methods=["POST"])
+def api_backup_upload():
+    if session.get("role") != "admin":
+        return jsonify({"success": False, "error": "Unauthorized"}), 403
+    f = request.files.get("database_file")
+    if not f or not f.filename.endswith(".db"):
+        return jsonify({"success": False, "error": "Please upload a valid .db file"}), 400
+    try:
+        tmp_path = DB_FILE + ".tmp"
+        f.save(tmp_path)
+        chk = sqlite3.connect(tmp_path)
+        t_count = chk.execute("SELECT count(*) FROM sqlite_master WHERE type='table'").fetchone()[0]
+        chk.close()
+        if t_count == 0:
+            os.remove(tmp_path)
+            return jsonify({"success": False, "error": "Uploaded file is not a valid repair shop database"}), 400
+        shutil.move(tmp_path, DB_FILE)
+        return jsonify({"success": True})
+    except Exception as ex:
+        return jsonify({"success": False, "error": str(ex)}), 500
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))

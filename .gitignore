@@ -3,11 +3,11 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# SQLite Database & temp files
-*.db
+# SQLite Database temp & backup files
 *.db-wal
 *.db-shm
 backup_*/
+mobile_repair_backup_*.db
 
 # OS generated files
 .DS_Store
