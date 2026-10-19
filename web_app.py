@@ -1170,6 +1170,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     let currentPhoneFilter = 'all';
     let activeBillData = {};
 
+    function showToast(message, isError = false) {
+      let toast = document.getElementById('app-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'app-toast';
+        toast.style.cssText = `
+          position: fixed; top: 75px; right: 20px; z-index: 99999;
+          background: #10b981; color: #fff; padding: 12px 20px; border-radius: 10px;
+          font-weight: 600; font-size: 0.92rem; box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+          display: flex; align-items: center; gap: 8px; transform: translateY(-20px);
+          opacity: 0; transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+          pointer-events: none; border: 1px solid rgba(255,255,255,0.2);
+        `;
+        document.body.appendChild(toast);
+      }
+      toast.style.background = isError ? '#ef4444' : '#10b981';
+      toast.innerHTML = (isError ? '⚠️ ' : '✔ ') + message;
+      toast.style.transform = 'translateY(0)';
+      toast.style.opacity = '1';
+
+      clearTimeout(toast._timer);
+      toast._timer = setTimeout(() => {
+        toast.style.transform = 'translateY(-20px)';
+        toast.style.opacity = '0';
+      }, 2500);
+    }
+
     function switchTab(tabId) {
       const tabs = ['dashboard', 'inventory', 'low_stock', 'stock_in_out', 'phones', 'history', 'reports', 'users', 'audit'];
       
@@ -1363,26 +1390,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         selling_price: parseFloat(document.getElementById('part-sell').value || 0),
         supplier: document.getElementById('part-supplier').value
       };
-      const res = await fetch('/api/add_part', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('✔ Part added successfully to inventory!');
-        closeModal('addPartModal');
-        document.getElementById('part-name').value = '';
-        document.getElementById('part-brand').value = '';
-        document.getElementById('part-model').value = '';
-        document.getElementById('part-compatible').value = '';
-        document.getElementById('part-category').value = '';
-        document.getElementById('part-purchase').value = '';
-        document.getElementById('part-sell').value = '';
-        loadParts();
-        loadDashboardStats();
-      } else {
-        alert('Error: ' + data.error);
+      // Close modal immediately and show optimistic toast
+      closeModal('addPartModal');
+      document.getElementById('part-name').value = '';
+      document.getElementById('part-brand').value = '';
+      document.getElementById('part-model').value = '';
+      document.getElementById('part-compatible').value = '';
+      document.getElementById('part-category').value = '';
+      document.getElementById('part-purchase').value = '';
+      document.getElementById('part-sell').value = '';
+      showToast('✔ Part added successfully to inventory!');
+
+      try {
+        const res = await fetch('/api/add_part', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadParts();
+          loadDashboardStats();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error saving part', true);
       }
     }
 
@@ -1418,36 +1451,47 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         selling_price: parseFloat(document.getElementById('edit-part-sell').value),
         supplier: document.getElementById('edit-part-supplier').value
       };
-      const res = await fetch('/api/edit_part', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('✔ Part updated successfully!');
-        closeModal('editPartModal');
-        loadParts();
-        loadDashboardStats();
-      } else {
-        alert('Error: ' + data.error);
+
+      closeModal('editPartModal');
+      showToast('✔ Part updated successfully!');
+
+      try {
+        const res = await fetch('/api/edit_part', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadParts();
+          loadDashboardStats();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error updating part', true);
       }
     }
 
     async function deletePart(pid, name) {
       if (!confirm(`Are you sure you want to delete part "${name}" (#${pid})?`)) return;
-      const res = await fetch('/api/delete_part', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: pid})
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('Part deleted.');
-        loadParts();
-        loadDashboardStats();
-      } else {
-        alert('Error: ' + data.error);
+      showToast('Deleting part...');
+      try {
+        const res = await fetch('/api/delete_part', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: pid})
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('Part deleted.');
+          loadParts();
+          loadDashboardStats();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error deleting part', true);
       }
     }
 
@@ -1557,27 +1601,40 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     async function submitStockMovement(e) {
       e.preventDefault();
       const part_id = document.getElementById('stock-part-select').value;
-      if (!part_id) return alert('Please choose a part!');
+      if (!part_id) {
+        showToast('Please select a part first!', true);
+        return;
+      }
       const payload = {
         part_id: parseInt(part_id),
         action: document.getElementById('stock-action').value === 'Stock Out' ? 'OUT' : 'IN',
-        quantity: parseInt(document.getElementById('stock-qty').value),
-        price: parseFloat(document.getElementById('stock-price').value),
+        quantity: parseInt(document.getElementById('stock-qty').value || 1),
+        price: parseFloat(document.getElementById('stock-price').value || 0),
         note: document.getElementById('stock-note').value
       };
-      const res = await fetch('/api/stock_movement', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('✔ Stock movement recorded successfully!');
-        loadStockPartsList();
-        loadDashboardStats();
-        switchTab('dashboard');
-      } else {
-        alert('Error: ' + data.error);
+
+      // IMMEDIATELY switch to dashboard and clear form on click!
+      switchTab('dashboard');
+      document.getElementById('stock-form').reset();
+      document.getElementById('stock-search-part').value = '';
+      showToast('✔ Stock movement saved successfully!');
+
+      try {
+        const res = await fetch('/api/stock_movement', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadStockPartsList();
+          loadDashboardStats();
+          loadParts();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error saving movement', true);
       }
     }
 
@@ -1674,26 +1731,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         repair_cost: parseFloat(document.getElementById('phone-cost').value || 0),
         status: document.getElementById('phone-status').value
       };
-      const res = await fetch('/api/add_phone', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('✔ Phone Repair Job saved successfully!');
-        closeModal('addPhoneModal');
-        document.getElementById('phone-cust-name').value = '';
-        document.getElementById('phone-cust-phone').value = '';
-        document.getElementById('phone-device-model').value = '';
-        document.getElementById('phone-problem').value = '';
-        document.getElementById('phone-work').value = '';
-        document.getElementById('phone-est-charge').value = '';
-        document.getElementById('phone-cost').value = '0';
-        loadPhones();
-        loadDashboardStats();
-      } else {
-        alert('Error: ' + data.error);
+      // Close modal immediately and clear form
+      closeModal('addPhoneModal');
+      document.getElementById('phone-cust-name').value = '';
+      document.getElementById('phone-cust-phone').value = '';
+      document.getElementById('phone-device-model').value = '';
+      document.getElementById('phone-problem').value = '';
+      document.getElementById('phone-work').value = '';
+      document.getElementById('phone-est-charge').value = '';
+      document.getElementById('phone-cost').value = '0';
+      showToast('✔ Phone Repair Job saved!');
+
+      try {
+        const res = await fetch('/api/add_phone', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadPhones();
+          loadDashboardStats();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error saving phone', true);
       }
     }
 
@@ -1727,51 +1790,67 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         status: document.getElementById('edit-phone-status').value,
         notes: document.getElementById('edit-phone-notes').value
       };
-      const res = await fetch('/api/edit_phone', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('✔ Repair Job updated successfully!');
-        closeModal('editPhoneModal');
-        loadPhones();
-        loadDashboardStats();
-      } else {
-        alert('Error: ' + data.error);
+
+      closeModal('editPhoneModal');
+      showToast('✔ Repair Job updated!');
+
+      try {
+        const res = await fetch('/api/edit_phone', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadPhones();
+          loadDashboardStats();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error updating phone', true);
       }
     }
 
     async function updatePhoneStatus(jid, newStatus) {
-      const res = await fetch('/api/update_phone_status', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: jid, status: newStatus})
-      });
-      const data = await res.json();
-      if (data.success) {
-        loadPhones();
-        loadDashboardStats();
-      } else {
-        alert('Error: ' + data.error);
+      showToast(`Status updated to ${newStatus}`);
+      try {
+        const res = await fetch('/api/update_phone_status', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: jid, status: newStatus})
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadPhones();
+          loadDashboardStats();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Error updating status', true);
       }
     }
 
     async function deliverPhone(id) {
       if (!confirm('Mark this phone as Delivered to customer?')) return;
-      const res = await fetch('/api/deliver_phone', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: id})
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('Phone marked as Delivered!');
-        loadPhones();
-        loadDashboardStats();
-      } else {
-        alert('Error: ' + data.error);
+      showToast('Marking as delivered...');
+      try {
+        const res = await fetch('/api/deliver_phone', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: id})
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✔ Phone marked as Delivered!');
+          loadPhones();
+          loadDashboardStats();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Error delivering phone', true);
       }
     }
 
@@ -1877,7 +1956,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     function exportReportsCSV() {
       if (!currentReportItems || currentReportItems.length === 0) {
-        alert('No data available to export.');
+        showToast('No data available to export.', true);
         return;
       }
       let csv = 'Date,Type,Description,Qty,Total Sale,Total Cost,Net Profit\\n';
@@ -1938,54 +2017,69 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         password: document.getElementById('new-user-pass').value,
         role: document.getElementById('new-user-role').value
       };
-      const res = await fetch('/api/add_user', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('✔ User account created successfully!');
-        closeModal('addUserModal');
-        document.getElementById('new-user-name').value = '';
-        document.getElementById('new-user-fullname').value = '';
-        document.getElementById('new-user-pass').value = '';
-        loadUsers();
-      } else {
-        alert('Error: ' + data.error);
+      closeModal('addUserModal');
+      document.getElementById('new-user-name').value = '';
+      document.getElementById('new-user-fullname').value = '';
+      document.getElementById('new-user-pass').value = '';
+      showToast('✔ Creating user account...');
+
+      try {
+        const res = await fetch('/api/add_user', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✔ User account created successfully!');
+          loadUsers();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error creating user', true);
       }
     }
 
     async function toggleUser(uid) {
-      const res = await fetch('/api/toggle_user', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: uid})
-      });
-      const data = await res.json();
-      if (data.success) {
-        loadUsers();
-      } else {
-        alert('Error: ' + data.error);
+      try {
+        const res = await fetch('/api/toggle_user', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: uid})
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('User status updated');
+          loadUsers();
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error updating user', true);
       }
     }
 
     async function promptChangePassword(uid, username) {
       const newPass = prompt(`Enter new password for "${username}":`);
       if (!newPass || newPass.length < 6) {
-        if (newPass) alert('Password must be at least 6 characters.');
+        if (newPass) showToast('Password must be at least 6 characters.', true);
         return;
       }
-      const res = await fetch('/api/change_user_password', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: uid, password: newPass})
-      });
-      const data = await res.json();
-      if (data.success) {
-        alert('✔ Password changed successfully!');
-      } else {
-        alert('Error: ' + data.error);
+      try {
+        const res = await fetch('/api/change_user_password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: uid, password: newPass})
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✔ Password changed successfully!');
+        } else {
+          showToast('Error: ' + data.error, true);
+        }
+      } catch (err) {
+        showToast('Network error updating password', true);
       }
     }
 
@@ -2023,7 +2117,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     async function submitRestoreDB(e) {
       e.preventDefault();
       const fileInput = document.getElementById('restore-file');
-      if (!fileInput.files.length) return alert('Please choose a .db file!');
+      if (!fileInput.files.length) return showToast('Please choose a .db file!', true);
       if (!confirm('WARNING: Current database will be replaced with the uploaded backup. Continue?')) return;
       const formData = new FormData();
       formData.append('backup_file', fileInput.files[0]);
@@ -2033,13 +2127,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           body: formData
         });
         if (res.ok) {
-          alert('Database restored successfully! Reloading...');
-          window.location.reload();
+          showToast('✔ Database restored successfully! Reloading...');
+          setTimeout(() => window.location.reload(), 1200);
         } else {
-          alert('Failed to restore database.');
+          showToast('Failed to restore database.', true);
         }
       } catch (err) {
-        alert('Error uploading file: ' + err);
+        showToast('Error uploading file: ' + err, true);
       }
     }
 

@@ -1630,7 +1630,6 @@ class RepairManager:
                 self.conn.commit()
                 self.log_audit("STOCK_MOVEMENT", "part", pid, f"Action: {act}, Qty: {qty}, Part: {p['name']}, New Stock: {new_qty}")
                 win.destroy()
-                messagebox.showinfo("Stock Updated", f"Stock movement saved successfully!\nNew quantity for {p['name']}: {new_qty}")
                 self.show_dashboard()
             except ValueError as e:
                 messagebox.showerror("Validation Error", str(e), parent=win)
