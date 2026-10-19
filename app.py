@@ -2581,7 +2581,68 @@ class RepairManager:
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = RepairManager(root)
-    root.protocol("WM_DELETE_WINDOW", app.close)
-    root.mainloop()
+    import sys
+    import threading
+    import subprocess
+    import socket
+    import webbrowser
+    import time
+
+    def is_port_open(port=5000):
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.settimeout(0.3)
+            return s.connect_ex(('127.0.0.1', port)) == 0
+        except Exception:
+            return False
+        finally:
+            s.close()
+
+    def run_flask_server():
+        try:
+            from web_app import app as flask_app
+            flask_app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+        except Exception as e:
+            print("Flask server error:", e)
+
+    # If --classic is passed, run legacy Tkinter window
+    if "--classic" in sys.argv or "-c" in sys.argv:
+        root = tk.Tk()
+        app = RepairManager(root)
+        root.protocol("WM_DELETE_WINDOW", app.close)
+        root.mainloop()
+    else:
+        # Start Flask background server if not already running
+        if not is_port_open(5000):
+            t = threading.Thread(target=run_flask_server, daemon=True)
+            t.start()
+            for _ in range(30):
+                if is_port_open(5000):
+                    break
+                time.sleep(0.15)
+
+        # Locate Microsoft Edge or Google Chrome for standalone App Window mode
+        candidates = [
+            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
+            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+        ]
+        browser_exe = None
+        for cand in candidates:
+            if os.path.exists(cand):
+                browser_exe = cand
+                break
+
+        url = "http://127.0.0.1:5000"
+        if browser_exe:
+            print(f"[*] Launching Patiraj Mobile Repair Shop in Native Desktop Window: {browser_exe}")
+            proc = subprocess.Popen([browser_exe, f"--app={url}", "--window-size=1280,820", "--window-position=60,40"])
+            try:
+                proc.wait()
+            except KeyboardInterrupt:
+                pass
+        else:
+            webbrowser.open(url)
