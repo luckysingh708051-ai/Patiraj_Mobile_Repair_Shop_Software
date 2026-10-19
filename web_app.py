@@ -216,41 +216,84 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     
     /* Header */
     header {
-      background: rgba(30, 41, 59, 0.96); backdrop-filter: blur(12px);
+      background: rgba(30, 41, 59, 0.98); backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 50;
-      padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 16px; display: flex; align-items: center; justify-content: space-between;
+      gap: 10px;
     }
-    .brand-title { display: flex; align-items: center; gap: 10px; }
-    .brand-title h1 { font-size: 1.15rem; font-weight: 700; color: #fff; letter-spacing: -0.2px; }
+    .brand-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 1; }
+    .brand-icon { font-size: 1.3rem; flex-shrink: 0; }
+    .brand-text { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+    .brand-name {
+      font-size: 1.12rem; font-weight: 700; color: #fff; letter-spacing: -0.2px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
     .brand-badge {
       font-size: 0.65rem; background: rgba(37, 99, 235, 0.2); color: #60a5fa;
       border: 1px solid rgba(37, 99, 235, 0.4); padding: 2px 7px; border-radius: 9999px; font-weight: 600;
+      white-space: nowrap;
     }
+    .header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
     .user-pill {
-      display: flex; align-items: center; gap: 8px; font-size: 0.82rem; background: #0f172a;
-      padding: 5px 12px; border-radius: 9999px; border: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px; font-size: 0.8rem; background: #0f172a;
+      padding: 5px 11px; border-radius: 9999px; border: 1px solid var(--border);
+      white-space: nowrap;
     }
-    .btn-logout { color: #f87171; text-decoration: none; font-weight: 600; margin-left: 4px; }
+    .btn-logout {
+      color: #f87171; text-decoration: none; font-weight: 700; margin-left: 3px;
+      background: rgba(239,68,68,0.15); padding: 2px 7px; border-radius: 6px; font-size: 0.74rem;
+    }
+    .btn-logout:hover { background: var(--danger); color: #fff; }
     .btn-header {
       background: #334155; color: #fff; border: none; padding: 6px 11px; border-radius: 7px;
       font-size: 0.78rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px;
+      white-space: nowrap; transition: background 0.15s;
     }
     .btn-header:hover { background: #475569; }
 
     /* Top Nav Tabs */
     .top-nav {
       background: #1e293b; border-bottom: 1px solid var(--border);
-      position: sticky; top: 57px; z-index: 40; overflow-x: auto; white-space: nowrap;
-      scrollbar-width: none;
+      position: sticky; top: 54px; z-index: 40; overflow-x: auto; white-space: nowrap;
+      scrollbar-width: none; -webkit-overflow-scrolling: touch;
     }
     .top-nav::-webkit-scrollbar { display: none; }
-    .top-nav-inner { display: flex; padding: 4px 12px; gap: 4px; max-width: 1400px; margin: 0 auto; }
+    .top-nav-inner { display: flex; padding: 6px 12px; gap: 6px; max-width: 1400px; margin: 0 auto; }
     .nav-tab {
-      padding: 8px 14px; font-size: 0.85rem; font-weight: 600; color: var(--muted);
-      cursor: pointer; border-radius: 8px; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 13px; font-size: 0.82rem; font-weight: 600; color: var(--muted);
+      cursor: pointer; border-radius: 8px; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 5px;
+      white-space: nowrap; background: rgba(255,255,255,0.03); border: 1px solid transparent;
     }
-    .nav-tab:hover { color: #fff; background: rgba(255,255,255,0.04); }
-    .nav-tab.active { color: #fff; background: var(--accent); box-shadow: 0 2px 8px rgba(37,99,235,0.35); }
+    .nav-tab:hover { color: #fff; background: rgba(255,255,255,0.06); }
+    .nav-tab.active { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 2px 8px rgba(37,99,235,0.35); }
+
+    /* Mobile Responsive Header */
+    @media (max-width: 768px) {
+      header {
+        padding: 8px 10px;
+        gap: 6px;
+      }
+      .brand-title { gap: 6px; }
+      .brand-icon { font-size: 1.15rem; }
+      .brand-name { font-size: 0.92rem; max-width: 155px; }
+      .brand-badge { display: none; }
+      .header-actions { gap: 4px; }
+      .btn-header { padding: 5px 8px; font-size: 0.74rem; }
+      .btn-header .btn-label { display: none; }
+      .user-pill { padding: 4px 7px; font-size: 0.74rem; }
+      .user-role-label { display: none; }
+      .top-nav {
+        top: 48px;
+        background: #162032;
+      }
+      .top-nav-inner { padding: 5px 8px; gap: 5px; }
+      .nav-tab { padding: 5px 10px; font-size: 0.76rem; border-radius: 20px; }
+    }
+
+    @media (min-width: 769px) {
+      .bottom-nav { display: none !important; }
+      body { padding-bottom: 0 !important; }
+    }
 
     /* Bottom Nav Bar (Mobile) */
     .bottom-nav {
@@ -380,17 +423,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <!-- Header -->
   <header class="no-print">
     <div class="brand-title">
-      <span style="font-size:1.4rem;">📱</span>
-      <div>
-        <h1>Patiraj Mobile Repair Shop</h1>
-        <span class="brand-badge">PRO v2.0 • Unified Web & Desktop</span>
+      <span class="brand-icon">📱</span>
+      <div class="brand-text">
+        <h1 class="brand-name">Patiraj Mobile Repair</h1>
+        <span class="brand-badge">PRO v2.0 • Web & Desktop</span>
       </div>
     </div>
-    <div style="display:flex; align-items:center; gap:8px;">
-      <a href="/api/backup/download" class="btn-header" title="Download SQLite database backup">💾 Backup</a>
-      <button class="btn-header" onclick="openRestoreModal()" title="Restore database file">📥 Restore</button>
+    <div class="header-actions">
+      <a href="/api/backup/download" class="btn-header" title="Download SQLite database backup">
+        <span>💾</span><span class="btn-label">Backup</span>
+      </a>
+      <button class="btn-header" onclick="openRestoreModal()" title="Restore database file">
+        <span>📥</span><span class="btn-label">Restore</span>
+      </button>
       <div class="user-pill">
-        <span>👤 {{ username }} ({{ role }})</span>
+        <span>👤 {{ username }}<span class="user-role-label"> ({{ role }})</span></span>
         <a href="/logout" class="btn-logout" title="Sign Out">Exit</a>
       </div>
     </div>
