@@ -130,6 +130,74 @@ def init_db():
         delivered_date TEXT DEFAULT ''
     )""")
 
+    cur.execute("""CREATE TABLE IF NOT EXISTS customers (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        customer_id TEXT UNIQUE NOT NULL,
+        name TEXT NOT NULL,
+        phone TEXT DEFAULT '',
+        address TEXT DEFAULT '',
+        created_at TEXT NOT NULL
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS bills (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        invoice_no TEXT UNIQUE NOT NULL,
+        customer_id TEXT DEFAULT '',
+        customer_name TEXT NOT NULL,
+        customer_phone TEXT DEFAULT '',
+        subtotal REAL NOT NULL DEFAULT 0,
+        discount REAL NOT NULL DEFAULT 0,
+        grand_total REAL NOT NULL DEFAULT 0,
+        paid_amount REAL NOT NULL DEFAULT 0,
+        balance_due REAL NOT NULL DEFAULT 0,
+        payment_method TEXT DEFAULT 'Cash',
+        payment_status TEXT DEFAULT 'Paid',
+        status TEXT DEFAULT 'Completed',
+        notes TEXT DEFAULT '',
+        created_by TEXT DEFAULT 'admin',
+        created_at TEXT NOT NULL
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS bill_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        bill_id INTEGER NOT NULL,
+        part_id INTEGER,
+        item_name TEXT NOT NULL,
+        quantity INTEGER NOT NULL DEFAULT 1,
+        unit_price REAL NOT NULL DEFAULT 0,
+        discount REAL NOT NULL DEFAULT 0,
+        total_price REAL NOT NULL DEFAULT 0,
+        cost_price REAL NOT NULL DEFAULT 0,
+        FOREIGN KEY(bill_id) REFERENCES bills(id)
+    )""")
+
+    cur.execute("""CREATE TABLE IF NOT EXISTS shop_settings (
+        setting_key TEXT PRIMARY KEY,
+        setting_value TEXT
+    )""")
+
+    # Safe migration: add customer_id to phones if missing
+    try:
+        phone_cols = [col[1] for col in cur.execute("PRAGMA table_info(phones)").fetchall()]
+        if "customer_id" not in phone_cols:
+            cur.execute("ALTER TABLE phones ADD COLUMN customer_id TEXT DEFAULT ''")
+    except Exception:
+        pass
+
+    # Seed default shop settings if missing
+    default_settings = [
+        ("shop_name", "Patiraj Mobile Repair Shop"),
+        ("shop_address", "Station Road, Near Bus Stand, Main Market"),
+        ("shop_phone", "+91 9876543210"),
+        ("shop_email", "patiraj.repair@example.com"),
+        ("invoice_terms", "Warranty valid for 30 days on parts replaced. Physical & water damage voids warranty."),
+        ("upi_id", ""),
+        ("theme", "dark"),
+        ("language", "en")
+    ]
+    for k, v in default_settings:
+        cur.execute("INSERT OR IGNORE INTO shop_settings(setting_key, setting_value) VALUES(?,?)", (k, v))
+
     # Seed default admin if no users exist
     user_count = cur.execute("SELECT COUNT(*) n FROM users").fetchone()["n"]
     if user_count == 0:
@@ -198,9 +266,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
-    :root {
+    :root, [data-theme="dark"] {
       --bg: #0f172a;
       --card: #1e293b;
+      --card-alt: #162032;
       --border: #334155;
       --accent: #2563eb;
       --accent-hover: #1d4ed8;
@@ -210,50 +279,90 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       --purple: #a855f7;
       --text: #f8fafc;
       --muted: #94a3b8;
+      --input-bg: #0f172a;
+      --table-head: #162032;
+      --table-hover: rgba(255, 255, 255, 0.02);
+      --header-bg: rgba(30, 41, 59, 0.98);
+      --top-nav-bg: #1e293b;
+      --top-nav-chip: rgba(255,255,255,0.04);
+      --btn-header-bg: #334155;
+      --btn-header-hover: #475569;
+      --pill-bg: #0f172a;
+      --invoice-bg: #ffffff;
+      --invoice-text: #111827;
+      --modal-bg: #1e293b;
     }
+
+    [data-theme="light"] {
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --card-alt: #f1f5f9;
+      --border: #e2e8f0;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --success: #059669;
+      --warning: #d97706;
+      --danger: #dc2626;
+      --purple: #7c3aed;
+      --text: #0f172a;
+      --muted: #64748b;
+      --input-bg: #ffffff;
+      --table-head: #f1f5f9;
+      --table-hover: rgba(0, 0, 0, 0.025);
+      --header-bg: rgba(255, 255, 255, 0.98);
+      --top-nav-bg: #ffffff;
+      --top-nav-chip: #f1f5f9;
+      --btn-header-bg: #e2e8f0;
+      --btn-header-hover: #cbd5e1;
+      --pill-bg: #f1f5f9;
+      --invoice-bg: #ffffff;
+      --invoice-text: #111827;
+      --modal-bg: #ffffff;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', sans-serif; -webkit-tap-highlight-color: transparent; }
-    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; padding-bottom: 75px; }
+    body { background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; padding-bottom: 75px; transition: background 0.2s, color 0.2s; }
     
     /* Header */
     header {
-      background: rgba(30, 41, 59, 0.98); backdrop-filter: blur(12px);
+      background: var(--header-bg); backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border); position: sticky; top: 0; z-index: 50;
       padding: 10px 16px; display: flex; align-items: center; justify-content: space-between;
       gap: 10px;
     }
-    .brand-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 1; }
+    .brand-title { display: flex; align-items: center; gap: 8px; min-width: 0; flex-shrink: 1; cursor: pointer; }
     .brand-icon { font-size: 1.3rem; flex-shrink: 0; }
     .brand-text { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
     .brand-name {
-      font-size: 1.12rem; font-weight: 700; color: #fff; letter-spacing: -0.2px;
+      font-size: 1.12rem; font-weight: 700; color: var(--text); letter-spacing: -0.2px;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .brand-badge {
-      font-size: 0.65rem; background: rgba(37, 99, 235, 0.2); color: #60a5fa;
-      border: 1px solid rgba(37, 99, 235, 0.4); padding: 2px 7px; border-radius: 9999px; font-weight: 600;
+      font-size: 0.65rem; background: rgba(37, 99, 235, 0.15); color: #3b82f6;
+      border: 1px solid rgba(37, 99, 235, 0.35); padding: 2px 7px; border-radius: 9999px; font-weight: 600;
       white-space: nowrap;
     }
-    .header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .header-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
     .user-pill {
-      display: flex; align-items: center; gap: 6px; font-size: 0.8rem; background: #0f172a;
-      padding: 5px 11px; border-radius: 9999px; border: 1px solid var(--border);
+      display: flex; align-items: center; gap: 6px; font-size: 0.8rem; background: var(--pill-bg);
+      padding: 5px 11px; border-radius: 9999px; border: 1px solid var(--border); color: var(--text);
       white-space: nowrap;
     }
     .btn-logout {
       color: #f87171; text-decoration: none; font-weight: 700; margin-left: 3px;
-      background: rgba(239,68,68,0.15); padding: 2px 7px; border-radius: 6px; font-size: 0.74rem;
+      background: rgba(239,68,68,0.15); padding: 2px 7px; border-radius: 6px; font-size: 0.74rem; cursor: pointer;
     }
     .btn-logout:hover { background: var(--danger); color: #fff; }
     .btn-header {
-      background: #334155; color: #fff; border: none; padding: 6px 11px; border-radius: 7px;
+      background: var(--btn-header-bg); color: var(--text); border: 1px solid var(--border); padding: 6px 11px; border-radius: 7px;
       font-size: 0.78rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 5px;
-      white-space: nowrap; transition: background 0.15s;
+      white-space: nowrap; transition: all 0.15s;
     }
-    .btn-header:hover { background: #475569; }
+    .btn-header:hover { background: var(--btn-header-hover); }
 
     /* Top Nav Tabs */
     .top-nav {
-      background: #1e293b; border-bottom: 1px solid var(--border);
+      background: var(--top-nav-bg); border-bottom: 1px solid var(--border);
       position: sticky; top: 54px; z-index: 40; overflow-x: auto; white-space: nowrap;
       scrollbar-width: none; -webkit-overflow-scrolling: touch;
     }
@@ -262,30 +371,24 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     .nav-tab {
       padding: 7px 13px; font-size: 0.82rem; font-weight: 600; color: var(--muted);
       cursor: pointer; border-radius: 8px; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 5px;
-      white-space: nowrap; background: rgba(255,255,255,0.03); border: 1px solid transparent;
+      white-space: nowrap; background: var(--top-nav-chip); border: 1px solid transparent;
     }
-    .nav-tab:hover { color: #fff; background: rgba(255,255,255,0.06); }
+    .nav-tab:hover { color: var(--text); background: rgba(37,99,235,0.08); }
     .nav-tab.active { color: #fff; background: var(--accent); border-color: var(--accent); box-shadow: 0 2px 8px rgba(37,99,235,0.35); }
 
     /* Mobile Responsive Header */
     @media (max-width: 768px) {
-      header {
-        padding: 8px 10px;
-        gap: 6px;
-      }
+      header { padding: 8px 10px; gap: 6px; }
       .brand-title { gap: 6px; }
       .brand-icon { font-size: 1.15rem; }
-      .brand-name { font-size: 0.92rem; max-width: 155px; }
+      .brand-name { font-size: 0.92rem; max-width: 140px; }
       .brand-badge { display: none; }
       .header-actions { gap: 4px; }
       .btn-header { padding: 5px 8px; font-size: 0.74rem; }
       .btn-header .btn-label { display: none; }
       .user-pill { padding: 4px 7px; font-size: 0.74rem; }
       .user-role-label { display: none; }
-      .top-nav {
-        top: 48px;
-        background: #162032;
-      }
+      .top-nav { top: 48px; }
       .top-nav-inner { padding: 5px 8px; gap: 5px; }
       .nav-tab { padding: 5px 10px; font-size: 0.76rem; border-radius: 20px; }
     }
@@ -297,7 +400,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     /* Bottom Nav Bar (Mobile) */
     .bottom-nav {
-      position: fixed; bottom: 0; left: 0; right: 0; background: rgba(30, 41, 59, 0.98);
+      position: fixed; bottom: 0; left: 0; right: 0; background: var(--header-bg);
       border-top: 1px solid var(--border); display: flex; justify-content: space-around;
       padding: 7px 4px; z-index: 50; backdrop-filter: blur(10px);
     }
@@ -315,11 +418,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 16px; }
     .stat-card {
       background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.15); transition: transform 0.15s;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.06); transition: transform 0.15s;
     }
     .stat-card:hover { transform: translateY(-2px); }
     .stat-label { font-size: 0.73rem; font-weight: 600; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.5px; }
-    .stat-val { font-size: 1.35rem; font-weight: 700; color: #fff; }
+    .stat-val { font-size: 1.35rem; font-weight: 700; color: var(--text); }
     .stat-sub { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
     .accent-green { color: var(--success); }
     .accent-blue { color: var(--accent); }
@@ -329,22 +432,23 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     /* Action bar */
     .action-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
     .search-input {
-      background: var(--card); border: 1px solid var(--border); color: var(--text); padding: 8px 12px;
+      background: var(--input-bg); border: 1px solid var(--border); color: var(--text); padding: 8px 12px;
       border-radius: 8px; font-size: 0.88rem; min-width: 180px; flex: 1; outline: none;
     }
     .search-input:focus { border-color: var(--accent); }
     .btn-primary {
       background: var(--accent); color: #fff; border: none; padding: 8px 14px; border-radius: 8px;
       font-weight: 600; font-size: 0.86rem; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
+      transition: background 0.15s, transform 0.1s;
     }
     .btn-primary:active { background: var(--accent-hover); transform: scale(0.98); }
     .btn-secondary {
-      background: #334155; color: #fff; border: none; padding: 8px 12px; border-radius: 8px;
+      background: var(--card-alt); color: var(--text); border: 1px solid var(--border); padding: 8px 12px; border-radius: 8px;
       font-weight: 600; font-size: 0.85rem; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;
     }
-    .btn-secondary:hover { background: #475569; }
+    .btn-secondary:hover { background: var(--border); }
     .btn-danger {
-      background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.4);
+      background: rgba(239,68,68,0.15); color: #ef4444; border: 1px solid rgba(239,68,68,0.35);
       padding: 4px 8px; border-radius: 6px; font-size: 0.78rem; font-weight: 600; cursor: pointer;
     }
     .btn-danger:hover { background: var(--danger); color: #fff; }
@@ -361,29 +465,29 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     /* Tables & Cards */
     .table-container {
       background: var(--card); border: 1px solid var(--border); border-radius: 12px;
-      overflow-x: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.2); margin-bottom: 16px;
+      overflow-x: auto; box-shadow: 0 4px 16px rgba(0,0,0,0.06); margin-bottom: 16px;
     }
     table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.85rem; }
-    th { background: #162032; padding: 10px 12px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; }
-    td { padding: 10px 12px; border-bottom: 1px solid rgba(51, 65, 85, 0.4); vertical-align: middle; }
-    tr:hover td { background: rgba(255,255,255,0.02); }
+    th { background: var(--table-head); padding: 10px 12px; color: var(--muted); font-weight: 600; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; color: var(--text); }
+    tr:hover td { background: var(--table-hover); }
 
     /* Modals */
     .modal-overlay {
-      position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7);
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.65);
       display: none; align-items: center; justify-content: center; z-index: 100; padding: 12px;
       backdrop-filter: blur(4px);
     }
     .modal-card {
-      background: #1e293b; border: 1px solid var(--border); border-radius: 14px;
+      background: var(--modal-bg); border: 1px solid var(--border); border-radius: 14px;
       width: 100%; max-width: 540px; max-height: 90vh; overflow-y: auto; padding: 22px;
-      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+      box-shadow: 0 20px 40px rgba(0,0,0,0.3); color: var(--text);
     }
     .modal-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
     .form-group { margin-bottom: 12px; }
     .form-group label { display: block; font-size: 0.78rem; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
     .form-control {
-      width: 100%; background: #0f172a; border: 1px solid var(--border); color: #fff;
+      width: 100%; background: var(--input-bg); border: 1px solid var(--border); color: var(--text);
       padding: 9px 12px; border-radius: 8px; font-size: 0.88rem; outline: none;
     }
     .form-control:focus { border-color: var(--accent); }
@@ -396,24 +500,91 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     .badge-waiting { background: rgba(244,63,94,0.2); color: #f43f5e; }
     .badge-ready { background: rgba(16,185,129,0.2); color: #34d399; }
     .badge-delivered { background: rgba(34,197,94,0.25); color: #4ade80; }
+    .badge-paid { background: rgba(16,185,129,0.2); color: #10b981; }
+    .badge-unpaid { background: rgba(239,68,68,0.2); color: #ef4444; }
+    .badge-partial { background: rgba(245,158,11,0.2); color: #f59e0b; }
+    .badge-cancelled { background: rgba(148,163,184,0.2); color: #94a3b8; }
 
-    /* Thermal Bill Paper Styling (Clean Print) */
-    #bill-receipt-paper {
-      background: #fff; color: #000; padding: 18px; border-radius: 8px; max-width: 380px; margin: 0 auto;
-      font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; line-height: 1.4;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    /* Billing POS Layout */
+    .pos-grid {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 16px;
+      margin-bottom: 20px;
     }
-    #bill-receipt-paper h2 { text-align: center; font-size: 1.15rem; margin-bottom: 2px; }
-    #bill-receipt-paper p { margin: 2px 0; }
-    .receipt-divider { border-top: 1px dashed #000; margin: 8px 0; }
-    .receipt-row { display: flex; justify-content: space-between; }
+    @media (max-width: 980px) {
+      .pos-grid { grid-template-columns: 1fr; }
+    }
+    .pos-cart-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 16px; box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+    }
+    .pos-summary-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 18px; box-shadow: 0 4px 16px rgba(0,0,0,0.06); height: fit-content;
+    }
+    .qty-btn {
+      width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--card-alt); color: var(--text); font-weight: bold; cursor: pointer;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .qty-btn:hover { background: var(--accent); color: #fff; }
+    .qty-input {
+      width: 44px; text-align: center; background: var(--input-bg); border: 1px solid var(--border);
+      color: var(--text); border-radius: 6px; padding: 4px; font-weight: 600;
+    }
+
+    /* Settings Page Layout */
+    .settings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 16px;
+      margin-top: 12px;
+    }
+    .settings-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 20px; box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+    }
+    .settings-card h3 {
+      font-size: 1.05rem; font-weight: 700; margin-bottom: 14px;
+      display: flex; align-items: center; gap: 8px; color: var(--text);
+    }
+    .theme-card-option {
+      border: 2px solid var(--border); border-radius: 10px; padding: 12px; cursor: pointer;
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+      transition: all 0.15s; background: var(--card-alt);
+    }
+    .theme-card-option.active { border-color: var(--accent); background: rgba(37,99,235,0.08); }
+
+    /* Printable Professional Invoice Slip */
+    #printable-invoice {
+      background: #ffffff; color: #111827; padding: 24px; border-radius: 12px;
+      max-width: 650px; margin: 0 auto; box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+      font-family: 'Outfit', sans-serif;
+    }
+    #printable-invoice h2 { font-size: 1.35rem; font-weight: 800; color: #111827; margin-bottom: 2px; }
+    #printable-invoice p { margin: 2px 0; color: #4b5563; font-size: 0.85rem; }
+    .inv-table { width: 100%; border-collapse: collapse; margin: 14px 0; }
+    .inv-table th { background: #f3f4f6 !important; color: #374151 !important; border-bottom: 2px solid #e5e7eb !important; font-size: 0.82rem; padding: 8px 10px; }
+    .inv-table td { border-bottom: 1px solid #e5e7eb !important; color: #1f2937 !important; font-size: 0.84rem; padding: 8px 10px; }
+    .inv-box { background: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 14px; margin: 10px 0; }
+    .inv-totals-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 0.88rem; }
 
     @media print {
-      body * { visibility: hidden; }
-      #bill-receipt-paper, #bill-receipt-paper * { visibility: visible; }
-      #bill-receipt-paper {
-        position: fixed; left: 0; top: 0; width: 100% !important; max-width: 80mm !important;
-        margin: 0 !important; padding: 6px !important; box-shadow: none !important;
+      body * { visibility: hidden !important; }
+      #printable-invoice, #printable-invoice * { visibility: visible !important; }
+      #printable-invoice {
+        position: fixed !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 12mm !important;
+        box-shadow: none !important;
+        border: none !important;
+        background: #fff !important;
+        color: #000 !important;
       }
       .no-print { display: none !important; }
     }
@@ -430,15 +601,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       </div>
     </div>
     <div class="header-actions">
-      <a href="/api/backup/download" class="btn-header" title="Download SQLite database backup">
-        <span>💾</span><span class="btn-label">Backup</span>
-      </a>
-      <button class="btn-header" onclick="openRestoreModal()" title="Restore database file">
-        <span>📥</span><span class="btn-label">Restore</span>
+      <button class="btn-header" onclick="toggleTheme()" id="header-theme-btn" title="Toggle Dark/Light Mode">
+        <span id="theme-icon">🌙</span><span class="btn-label" data-i18n="theme_btn">Theme</span>
       </button>
+      <button class="btn-header" onclick="toggleLanguage()" id="header-lang-btn" title="Switch Language">
+        <span>🌐</span><span class="btn-label" id="header-lang-label">EN</span>
+      </button>
+      <button class="btn-header" onclick="switchTab('settings')" title="Settings">
+        <span>⚙️</span><span class="btn-label" data-i18n="nav_settings">Settings</span>
+      </button>
+      <a href="/api/backup/download" class="btn-header" title="Download SQLite database backup">
+        <span>💾</span><span class="btn-label" data-i18n="btn_backup">Backup</span>
+      </a>
       <div class="user-pill">
         <span>👤 {{ username }}<span class="user-role-label"> ({{ role }})</span></span>
-        <a href="/logout" class="btn-logout" title="Sign Out">Exit</a>
+        <span onclick="confirmLogout()" class="btn-logout" title="Sign Out" data-i18n="btn_logout">Exit</span>
       </div>
     </div>
   </header>
@@ -446,17 +623,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
   <!-- Top Nav Tabs for Windows Desktop -->
   <div class="top-nav no-print">
     <div class="top-nav-inner">
-      <div class="nav-tab active" onclick="switchTab('dashboard')" id="nav-dashboard">📊 Dashboard</div>
-      <div class="nav-tab" onclick="switchTab('inventory')" id="nav-inventory">📦 Parts Inventory</div>
-      <div class="nav-tab" onclick="switchTab('low_stock')" id="nav-low_stock">⚠️ Low Stock Watchlist</div>
-      <div class="nav-tab" onclick="switchTab('stock_in_out')" id="nav-stock_in_out">🔄 Stock In / Out</div>
-      <div class="nav-tab" onclick="switchTab('phones')" id="nav-phones">📱 Phone Repairs</div>
-      <div class="nav-tab" onclick="switchTab('history')" id="nav-history">📜 Movement Log</div>
-      <div class="nav-tab" onclick="switchTab('reports')" id="nav-reports">📈 Reports & Analytics</div>
+      <div class="nav-tab active" onclick="switchTab('dashboard')" id="nav-dashboard" data-i18n="nav_dashboard">📊 Dashboard</div>
+      <div class="nav-tab" onclick="switchTab('billing')" id="nav-billing" data-i18n="nav_billing">🧾 Billing & Invoices</div>
+      <div class="nav-tab" onclick="switchTab('inventory')" id="nav-inventory" data-i18n="nav_inventory">📦 Parts Inventory</div>
+      <div class="nav-tab" onclick="switchTab('low_stock')" id="nav-low_stock" data-i18n="nav_low_stock">⚠️ Low Stock Watchlist</div>
+      <div class="nav-tab" onclick="switchTab('stock_in_out')" id="nav-stock_in_out" data-i18n="nav_stock_in_out">🔄 Stock In / Out</div>
+      <div class="nav-tab" onclick="switchTab('phones')" id="nav-phones" data-i18n="nav_phones">📱 Phone Repairs</div>
+      <div class="nav-tab" onclick="switchTab('history')" id="nav-history" data-i18n="nav_history">📜 Movement Log</div>
+      <div class="nav-tab" onclick="switchTab('reports')" id="nav-reports" data-i18n="nav_reports">📈 Reports & Analytics</div>
       {% if role == 'admin' %}
-      <div class="nav-tab" onclick="switchTab('users')" id="nav-users">👥 Staff & Users</div>
-      <div class="nav-tab" onclick="switchTab('audit')" id="nav-audit">🛡️ Audit Logs</div>
+      <div class="nav-tab" onclick="switchTab('users')" id="nav-users" data-i18n="nav_users">👥 Staff & Users</div>
+      <div class="nav-tab" onclick="switchTab('audit')" id="nav-audit" data-i18n="nav_audit">🛡️ Audit Logs</div>
       {% endif %}
+      <div class="nav-tab" onclick="switchTab('settings')" id="nav-settings" data-i18n="nav_settings">⚙️ Settings</div>
     </div>
   </div>
 
@@ -574,7 +753,220 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       </div>
     </section>
 
-    <!-- 2. INVENTORY TAB (Full Parts CRUD) -->
+    <!-- 2. BILLING & INVOICES TAB -->
+    <section id="tab-billing" style="display:none;">
+      <div class="action-bar" style="margin-bottom:14px;">
+        <div style="display:flex; gap:8px; align-items:center;">
+          <h2 style="font-size:1.2rem; font-weight:700;" data-i18n="bill_title">🧾 Billing & Invoices</h2>
+        </div>
+        <div class="filter-pills" style="padding:0; margin:0;">
+          <div class="pill active" onclick="switchBillingSubTab('pos')" id="subtab-bill-pos" data-i18n="bill_subtab_pos">➕ New Invoice (POS)</div>
+          <div class="pill" onclick="switchBillingSubTab('history')" id="subtab-bill-history" data-i18n="bill_subtab_history">📜 Invoice Records & History</div>
+        </div>
+      </div>
+
+      <!-- POS CREATION SUBVIEW -->
+      <div id="billing-pos-view">
+        <div class="pos-grid">
+          <!-- Left: Customer Info & Live Cart Items -->
+          <div>
+            <!-- Customer Bar -->
+            <div class="pos-cart-card" style="margin-bottom:14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h4 style="font-size:0.95rem; font-weight:700;" data-i18n="bill_cust_details">👤 Customer Information</h4>
+                <button type="button" class="btn-secondary" onclick="generateNewCustomerId()" style="padding:4px 8px; font-size:0.75rem;" title="Generate new Customer ID">🔄 Auto ID</button>
+              </div>
+              <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:10px;">
+                <div class="form-group" style="margin-bottom:0;">
+                  <label data-i18n="bill_cust_id">Customer ID *</label>
+                  <input type="text" id="pos-cust-id" class="form-control" placeholder="CUST-1001" style="font-weight:600; color:var(--accent);">
+                </div>
+                <div class="form-group" style="margin-bottom:0; position:relative;">
+                  <label data-i18n="bill_cust_name">Customer Name *</label>
+                  <input type="text" id="pos-cust-name" class="form-control" placeholder="Enter Customer Name" oninput="onCustomerInput(this.value)">
+                  <div id="cust-autocomplete-list" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--card); border:1px solid var(--border); border-radius:8px; z-index:30; max-height:160px; overflow-y:auto; box-shadow:0 10px 20px rgba(0,0,0,0.3);"></div>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label data-i18n="bill_cust_phone">Phone / WhatsApp</label>
+                  <input type="text" id="pos-cust-phone" class="form-control" placeholder="10-digit mobile number">
+                </div>
+              </div>
+            </div>
+
+            <!-- Item Add Bar -->
+            <div class="pos-cart-card" style="margin-bottom:14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <h4 style="font-size:0.95rem; font-weight:700;" data-i18n="bill_add_items_heading">📦 Add Items to Bill</h4>
+                <div style="display:flex; gap:6px;">
+                  <button type="button" class="btn-primary" onclick="openMultiItemPickerModal()" style="padding:5px 10px; font-size:0.78rem;" data-i18n="bill_btn_multi_select">📋 Multi-Item Picker</button>
+                  <button type="button" class="btn-secondary" onclick="openCustomItemModal()" style="padding:5px 10px; font-size:0.78rem;" data-i18n="bill_btn_custom_service">🛠️ Add Service / Labor</button>
+                </div>
+              </div>
+
+              <!-- Quick Part Selector -->
+              <div style="display:grid; grid-template-columns: 2fr 1fr 1fr auto; gap:8px; align-items:end;">
+                <div class="form-group" style="margin-bottom:0;">
+                  <label data-i18n="bill_select_inventory_part">Select Inventory Part</label>
+                  <select id="pos-part-select" class="form-control" onchange="onPosPartSelectChange()">
+                    <option value="">-- Choose a spare part --</option>
+                  </select>
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label data-i18n="bill_qty_label">Quantity</label>
+                  <input type="number" id="pos-part-qty" class="form-control" value="1" min="1">
+                </div>
+                <div class="form-group" style="margin-bottom:0;">
+                  <label data-i18n="bill_rate_label">Unit Price (₹)</label>
+                  <input type="number" id="pos-part-rate" class="form-control" placeholder="0.00">
+                </div>
+                <button type="button" class="btn-primary" onclick="addSinglePartToPosCart()" style="height:38px;" data-i18n="bill_btn_add">➕ Add</button>
+              </div>
+              <div id="pos-part-hint" style="font-size:0.76rem; color:var(--muted); margin-top:4px;"></div>
+            </div>
+
+            <!-- Cart Table -->
+            <div class="table-container">
+              <table id="pos-cart-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th data-i18n="th_item_description">Item Description</th>
+                    <th data-i18n="th_stock_status">Stock Available</th>
+                    <th data-i18n="th_qty">Quantity</th>
+                    <th data-i18n="th_unit_price">Unit Price (₹)</th>
+                    <th data-i18n="th_line_total">Total (₹)</th>
+                    <th data-i18n="th_action">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="pos-cart-tbody">
+                  <tr><td colspan="7" style="text-align:center; padding:24px; color:var(--muted);" data-i18n="pos_empty_cart">No items added to invoice yet. Select items above.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Right: Summary, Payment & Finalize -->
+          <div>
+            <div class="pos-summary-card">
+              <h3 style="font-size:1.1rem; font-weight:700; margin-bottom:14px; border-bottom:1px solid var(--border); padding-bottom:8px;" data-i18n="bill_payment_summary">💰 Invoice Summary</h3>
+              
+              <div class="inv-totals-row">
+                <span style="color:var(--muted);" data-i18n="bill_subtotal">Subtotal:</span>
+                <strong id="pos-subtotal" style="font-size:1rem;">₹0.00</strong>
+              </div>
+
+              <div class="inv-totals-row" style="align-items:center; margin:6px 0;">
+                <span style="color:var(--muted);" data-i18n="bill_discount">Discount (₹):</span>
+                <input type="number" id="pos-discount" class="form-control" value="0" min="0" style="width:100px; padding:4px 8px; text-align:right;" oninput="calculateBillTotals()">
+              </div>
+
+              <div class="inv-totals-row" style="border-top:1px dashed var(--border); margin-top:8px; padding-top:10px;">
+                <span style="font-size:1.05rem; font-weight:700;" data-i18n="bill_grand_total">Grand Total:</span>
+                <strong id="pos-grand-total" style="font-size:1.35rem; color:var(--accent);">₹0.00</strong>
+              </div>
+
+              <div class="form-group" style="margin-top:14px;">
+                <label data-i18n="bill_payment_method">Payment Method</label>
+                <select id="pos-pay-method" class="form-control" onchange="calculateBillTotals()">
+                  <option value="Cash">💵 Cash</option>
+                  <option value="UPI">📱 UPI / QR Scan</option>
+                  <option value="Card">💳 Debit / Credit Card</option>
+                  <option value="Due">⏳ Due / Credit Account</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label data-i18n="bill_amount_paid">Amount Paid by Customer (₹)</label>
+                <input type="number" id="pos-paid-amount" class="form-control" placeholder="0.00" oninput="calculateBillTotals()" style="font-size:1.05rem; font-weight:700; color:var(--success);">
+              </div>
+
+              <div class="inv-totals-row" style="background:var(--card-alt); padding:8px 10px; border-radius:8px; margin:10px 0;">
+                <span style="font-weight:600;" data-i18n="bill_balance_due">Balance Due:</span>
+                <strong id="pos-balance-due" style="font-size:1.1rem; color:var(--danger);">₹0.00</strong>
+              </div>
+
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <span style="font-size:0.8rem; color:var(--muted);" data-i18n="bill_payment_status">Status:</span>
+                <span id="pos-status-badge" class="badge badge-ready">PAID</span>
+              </div>
+
+              <div class="form-group">
+                <label data-i18n="bill_notes_label">Invoice Notes / Remarks</label>
+                <textarea id="pos-notes" class="form-control" rows="2" placeholder="e.g. 6 months warranty, original touch"></textarea>
+              </div>
+
+              <button type="button" onclick="finalizeBill()" class="btn-primary" style="width:100%; padding:12px; font-size:1rem; justify-content:center; background:var(--success);" id="btn-finalize-bill" data-i18n="bill_btn_finalize">
+                ✅ Finalize & Save Bill
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INVOICE RECORDS / HISTORY SUBVIEW -->
+      <div id="billing-history-view" style="display:none;">
+        <div class="stats-grid" style="grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));">
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_total_billed">Total Billed</div>
+            <div class="stat-val accent-green" id="hist-total-billed">₹0.00</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_total_collected">Total Collected</div>
+            <div class="stat-val accent-blue" id="hist-total-collected">₹0.00</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_total_due">Pending Due</div>
+            <div class="stat-val accent-orange" id="hist-total-due">₹0.00</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label" data-i18n="stat_bills_count">Total Bills Generated</div>
+            <div class="stat-val accent-cyan" id="hist-bills-count">0</div>
+          </div>
+        </div>
+
+        <div class="action-bar">
+          <input type="text" id="bill-history-search" class="search-input" placeholder="🔍 Search invoice #, customer name, phone, or customer ID..." oninput="loadBillsHistory()">
+          <div style="display:flex; gap:8px;">
+            <select id="bill-history-period" class="search-input" style="min-width:130px; flex:none;" onchange="loadBillsHistory()">
+              <option value="all">All Time</option>
+              <option value="today">Today</option>
+              <option value="month">This Month</option>
+            </select>
+            <select id="bill-history-status" class="search-input" style="min-width:130px; flex:none;" onchange="loadBillsHistory()">
+              <option value="all">All Statuses</option>
+              <option value="Paid">Paid</option>
+              <option value="Partially Paid">Partially Paid</option>
+              <option value="Unpaid">Unpaid</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th data-i18n="th_invoice_no">Invoice #</th>
+                <th data-i18n="th_date">Date</th>
+                <th data-i18n="th_customer">Customer (ID)</th>
+                <th data-i18n="th_phone">Phone</th>
+                <th data-i18n="th_items_count">Items</th>
+                <th data-i18n="th_grand_total">Total (₹)</th>
+                <th data-i18n="th_paid">Paid (₹)</th>
+                <th data-i18n="th_due">Due (₹)</th>
+                <th data-i18n="th_status">Status</th>
+                <th data-i18n="th_method">Method</th>
+                <th data-i18n="th_actions">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="bill-history-tbody">
+              <tr><td colspan="11" style="text-align:center; padding:18px; color:var(--muted);">Loading invoices...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. INVENTORY TAB (Full Parts CRUD) -->
     <section id="tab-inventory" style="display:none;">
       <div class="action-bar">
         <input type="text" id="parts-search" class="search-input" placeholder="🔍 Search name, brand, model, compatible..." oninput="loadParts()">
@@ -849,29 +1241,158 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         </table>
       </div>
     </section>
+
+    <!-- 10. SETTINGS TAB -->
+    <section id="tab-settings" style="display:none;">
+      <div class="action-bar">
+        <h2 style="font-size:1.2rem; font-weight:700;" data-i18n="settings_title">⚙️ Software Settings & Preferences</h2>
+      </div>
+
+      <div class="settings-grid">
+        <!-- Card 1: Appearance & Theme -->
+        <div class="settings-card">
+          <h3 data-i18n="settings_appearance_heading">🎨 Theme & Appearance</h3>
+          <p style="font-size:0.8rem; color:var(--muted); margin-bottom:12px;" data-i18n="settings_appearance_sub">Choose between modern dark mode or high-contrast light mode</p>
+          
+          <div class="theme-card-option" id="theme-opt-dark" onclick="setTheme('dark')">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:1.4rem;">🌙</span>
+              <div>
+                <strong data-i18n="settings_dark_mode">Dark Mode</strong>
+                <p style="font-size:0.75rem; color:var(--muted);" data-i18n="settings_dark_sub">Sleek, eye-friendly dark slate theme</p>
+              </div>
+            </div>
+            <input type="radio" name="settings-theme" value="dark" checked>
+          </div>
+
+          <div class="theme-card-option" id="theme-opt-light" onclick="setTheme('light')">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:1.4rem;">☀️</span>
+              <div>
+                <strong data-i18n="settings_light_mode">Light Mode</strong>
+                <p style="font-size:0.75rem; color:var(--muted);" data-i18n="settings_light_sub">Clean, bright high-contrast theme</p>
+              </div>
+            </div>
+            <input type="radio" name="settings-theme" value="light">
+          </div>
+        </div>
+
+        <!-- Card 2: Language Settings -->
+        <div class="settings-card">
+          <h3 data-i18n="settings_language_heading">🌐 Language (भाषा)</h3>
+          <p style="font-size:0.8rem; color:var(--muted); margin-bottom:12px;" data-i18n="settings_language_sub">Select your preferred display language</p>
+
+          <div class="theme-card-option" id="lang-opt-en" onclick="setLanguage('en')">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:1.4rem;">🇬🇧</span>
+              <div>
+                <strong>English</strong>
+                <p style="font-size:0.75rem; color:var(--muted);">Full English interface with zero Hindi subtitles</p>
+              </div>
+            </div>
+            <input type="radio" name="settings-language" value="en" checked>
+          </div>
+
+          <div class="theme-card-option" id="lang-opt-hi" onclick="setLanguage('hi')">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <span style="font-size:1.4rem;">🇮🇳</span>
+              <div>
+                <strong>हिन्दी (Hindi)</strong>
+                <p style="font-size:0.75rem; color:var(--muted);">सम्पूर्ण सॉफ्टवेयर हिन्दी भाषा में</p>
+              </div>
+            </div>
+            <input type="radio" name="settings-language" value="hi">
+          </div>
+        </div>
+
+        <!-- Card 3: User Account & Logout -->
+        <div class="settings-card">
+          <h3 data-i18n="settings_account_heading">👤 User Account & Session</h3>
+          <div style="background:var(--card-alt); padding:10px 14px; border-radius:8px; margin-bottom:14px; border:1px solid var(--border);">
+            <p style="font-size:0.82rem; color:var(--muted);" data-i18n="settings_logged_in_as">Logged in as:</p>
+            <p style="font-size:1.05rem; font-weight:700;">{{ username }} <span class="badge badge-progress" style="font-size:0.7rem;">{{ role|upper }}</span></p>
+          </div>
+
+          <form onsubmit="submitChangeMyPassword(event)" style="margin-bottom:16px;">
+            <div class="form-group">
+              <label data-i18n="settings_new_password">Change My Password</label>
+              <input type="password" id="settings-my-pwd" class="form-control" placeholder="Minimum 6 characters" required>
+            </div>
+            <button type="submit" class="btn-primary" style="padding:6px 12px; font-size:0.82rem;" data-i18n="settings_update_pwd_btn">Update Password</button>
+          </form>
+
+          <div style="border-top:1px solid var(--border); padding-top:14px;">
+            <button type="button" onclick="confirmLogout()" class="btn-danger" style="width:100%; padding:10px; font-size:0.9rem; justify-content:center; display:flex; align-items:center; gap:6px;" data-i18n="settings_logout_btn">
+              🚪 Logout from Application
+            </button>
+          </div>
+        </div>
+
+        <!-- Card 4: Shop & Billing Details -->
+        <div class="settings-card" style="grid-column: 1 / -1;">
+          <h3 data-i18n="settings_shop_info_heading">🏪 Shop & Invoice Configuration</h3>
+          <p style="font-size:0.8rem; color:var(--muted); margin-bottom:14px;" data-i18n="settings_shop_info_sub">These details appear on all printed and shared customer invoices.</p>
+
+          <form onsubmit="submitSaveShopSettings(event)">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap:12px;">
+              <div class="form-group">
+                <label data-i18n="settings_shop_name">Shop Name *</label>
+                <input type="text" id="cfg-shop-name" class="form-control" value="Patiraj Mobile Repair Shop" required>
+              </div>
+              <div class="form-group">
+                <label data-i18n="settings_shop_phone">Contact Phone / WhatsApp *</label>
+                <input type="text" id="cfg-shop-phone" class="form-control" value="+91 9876543210" required>
+              </div>
+              <div class="form-group">
+                <label data-i18n="settings_shop_email">Shop Email (Optional)</label>
+                <input type="email" id="cfg-shop-email" class="form-control" placeholder="shop@example.com">
+              </div>
+              <div class="form-group">
+                <label data-i18n="settings_upi_id">UPI ID / QR Payment Address (Optional)</label>
+                <input type="text" id="cfg-upi-id" class="form-control" placeholder="e.g. 9876543210@upi">
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label data-i18n="settings_shop_address">Shop Address *</label>
+              <textarea id="cfg-shop-address" class="form-control" rows="2" required>Station Road, Near Bus Stand, Main Market</textarea>
+            </div>
+
+            <div class="form-group">
+              <label data-i18n="settings_terms_conditions">Terms, Conditions & Warranty Disclaimer</label>
+              <textarea id="cfg-invoice-terms" class="form-control" rows="2">Warranty valid for 30 days on replaced hardware components. Physical impact or liquid damage voids all warranty.</textarea>
+            </div>
+
+            <button type="submit" class="btn-primary" style="padding:10px 18px;" data-i18n="btn_save_settings">
+              💾 Save Shop & Billing Settings
+            </button>
+          </form>
+        </div>
+      </div>
+    </section>
   </main>
 
   <!-- Bottom Navigation Bar for Mobile -->
   <nav class="bottom-nav no-print">
     <div class="bottom-tab active" onclick="switchTab('dashboard')" id="btn-dash">
       <span class="bottom-tab-icon">📊</span>
-      <span>Dashboard</span>
+      <span data-i18n="nav_dashboard">Dashboard</span>
     </div>
-    <div class="bottom-tab" onclick="switchTab('inventory')" id="btn-inv">
-      <span class="bottom-tab-icon">📦</span>
-      <span>Parts</span>
+    <div class="bottom-tab" onclick="switchTab('billing')" id="btn-bill">
+      <span class="bottom-tab-icon">🧾</span>
+      <span data-i18n="nav_billing">Billing</span>
     </div>
     <div class="bottom-tab" onclick="switchTab('phones')" id="btn-phones">
       <span class="bottom-tab-icon">📱</span>
-      <span>Repairs</span>
+      <span data-i18n="nav_phones">Repairs</span>
     </div>
-    <div class="bottom-tab" onclick="switchTab('stock_in_out')" id="btn-stock">
-      <span class="bottom-tab-icon">🔄</span>
-      <span>Stock</span>
+    <div class="bottom-tab" onclick="switchTab('inventory')" id="btn-inv">
+      <span class="bottom-tab-icon">📦</span>
+      <span data-i18n="nav_inventory">Inventory</span>
     </div>
-    <div class="bottom-tab" onclick="switchTab('reports')" id="btn-rep">
-      <span class="bottom-tab-icon">📈</span>
-      <span>Reports</span>
+    <div class="bottom-tab" onclick="switchTab('settings')" id="btn-settings">
+      <span class="bottom-tab-icon">⚙️</span>
+      <span data-i18n="nav_settings">Settings</span>
     </div>
   </nav>
 
@@ -1207,6 +1728,212 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     </div>
   </div>
 
+  <!-- Multi-Item Picker Modal -->
+  <div class="modal-overlay" id="multiItemPickerModal">
+    <div class="modal-card" style="max-width:720px;">
+      <div class="modal-hdr">
+        <h3 style="font-size:1.1rem; font-weight:700;" data-i18n="multi_picker_title">📦 Select Items from Inventory</h3>
+        <button onclick="closeModal('multiItemPickerModal')" style="background:none; border:none; color:var(--muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+      </div>
+      <div style="margin-bottom:12px;">
+        <input type="text" id="multi-picker-search" class="search-input" placeholder="🔍 Search parts by name, model or category..." oninput="filterMultiPickerParts()">
+      </div>
+      <div class="table-container" style="max-height:360px; overflow-y:auto; margin-bottom:14px;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width:40px;"><input type="checkbox" id="multi-picker-select-all" onchange="toggleSelectAllMultiPicker(this.checked)"></th>
+              <th data-i18n="th_item_name">Part Name</th>
+              <th>Brand & Model</th>
+              <th data-i18n="th_stock">Available Stock</th>
+              <th data-i18n="th_unit_price">Price (₹)</th>
+              <th data-i18n="th_qty">Quantity to Add</th>
+            </tr>
+          </thead>
+          <tbody id="multi-picker-tbody">
+            <tr><td colspan="6" style="text-align:center; padding:18px; color:var(--muted);">Loading inventory items...</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-actions" style="justify-content:space-between; align-items:center;">
+        <span id="multi-picker-count" style="font-size:0.85rem; color:var(--muted);">0 items selected</span>
+        <div style="display:flex; gap:8px;">
+          <button type="button" class="btn-secondary" onclick="closeModal('multiItemPickerModal')" data-i18n="btn_cancel">Cancel</button>
+          <button type="button" class="btn-primary" onclick="addSelectedItemsFromPicker()" data-i18n="btn_add_selected">➕ Add Selected to Bill</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Custom Item / Service Modal -->
+  <div class="modal-overlay" id="customItemModal">
+    <div class="modal-card" style="max-width:440px;">
+      <div class="modal-hdr">
+        <h3 style="font-size:1.1rem; font-weight:700;" data-i18n="custom_service_title">🛠️ Add Custom Service or Part</h3>
+        <button onclick="closeModal('customItemModal')" style="background:none; border:none; color:var(--muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+      </div>
+      <form onsubmit="submitCustomItem(event)">
+        <div class="form-group">
+          <label data-i18n="custom_item_name">Service / Item Description *</label>
+          <input type="text" id="custom-item-name" class="form-control" placeholder="e.g. Screen Replacement Labor, Flashing" required>
+        </div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+          <div class="form-group">
+            <label data-i18n="th_qty">Quantity *</label>
+            <input type="number" id="custom-item-qty" class="form-control" value="1" min="1" required>
+          </div>
+          <div class="form-group">
+            <label data-i18n="th_unit_price">Price / Charge (₹) *</label>
+            <input type="number" id="custom-item-price" class="form-control" placeholder="0.00" min="0" required>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" onclick="closeModal('customItemModal')" data-i18n="btn_cancel">Cancel</button>
+          <button type="submit" class="btn-primary" data-i18n="btn_add_to_bill">➕ Add to Invoice</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Professional Customer Invoice Modal -->
+  <div class="modal-overlay" id="invoiceModal">
+    <div class="modal-card" style="max-width:700px; padding:18px;">
+      <div class="modal-hdr no-print" style="margin-bottom:10px;">
+        <h3 style="font-size:1.1rem; font-weight:700;" data-i18n="invoice_preview_title">🧾 Customer Tax Invoice</h3>
+        <button onclick="closeModal('invoiceModal')" style="background:none; border:none; color:var(--muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+      </div>
+
+      <!-- PRINTABLE INVOICE DOCUMENT -->
+      <div id="printable-invoice">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:2px solid #3b82f6; padding-bottom:12px; margin-bottom:12px;">
+          <div>
+            <h2 id="inv-shop-name" style="font-size:1.35rem; font-weight:800; color:#1e293b;">Patiraj Mobile Repair Shop</h2>
+            <p id="inv-shop-address" style="font-size:0.82rem; color:#475569; margin-top:2px;">Station Road, Near Bus Stand, Main Market</p>
+            <p id="inv-shop-contact" style="font-size:0.82rem; color:#475569;">📞 Phone: +91 9876543210</p>
+          </div>
+          <div style="text-align:right;">
+            <div style="background:#2563eb; color:#fff; font-size:0.75rem; font-weight:700; padding:3px 10px; border-radius:4px; display:inline-block; margin-bottom:4px;" data-i18n="inv_badge">REPAIR & RETAIL INVOICE</div>
+            <p style="font-size:0.9rem; font-weight:700; color:#1e293b;"><span data-i18n="th_invoice_no">Invoice</span>: <span id="inv-number">INV-202610-0001</span></p>
+            <p style="font-size:0.8rem; color:#64748b;"><span data-i18n="th_date">Date</span>: <span id="inv-date">2026-10-20</span></p>
+          </div>
+        </div>
+
+        <!-- Customer & Billing Meta Details -->
+        <div class="inv-box" style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+          <div>
+            <p style="font-size:0.75rem; color:#6b7280; text-transform:uppercase; font-weight:600;" data-i18n="inv_billed_to">Billed To (Customer):</p>
+            <p style="font-size:0.98rem; font-weight:700; color:#111827; margin-top:2px;" id="inv-cust-name">Ramesh Kumar</p>
+            <p style="font-size:0.84rem; color:#374151;">📞 <span id="inv-cust-phone">9876543210</span></p>
+          </div>
+          <div style="text-align:right;">
+            <p style="font-size:0.75rem; color:#6b7280; text-transform:uppercase; font-weight:600;" data-i18n="bill_cust_id">Customer ID:</p>
+            <p style="font-size:1.05rem; font-weight:800; color:#2563eb; margin-top:2px;" id="inv-cust-id">CUST-1001</p>
+            <p style="font-size:0.84rem; color:#374151;"><span data-i18n="th_method">Payment</span>: <strong id="inv-pay-method">Cash</strong> (<span id="inv-pay-status" style="font-weight:700; color:#059669;">PAID</span>)</p>
+          </div>
+        </div>
+
+        <!-- Line Items Table -->
+        <table class="inv-table">
+          <thead>
+            <tr>
+              <th style="width:30px;">#</th>
+              <th data-i18n="th_item_description">Item Description</th>
+              <th style="text-align:center; width:60px;" data-i18n="th_qty">Qty</th>
+              <th style="text-align:right; width:90px;" data-i18n="th_unit_price">Rate (₹)</th>
+              <th style="text-align:right; width:90px;" data-i18n="th_line_total">Amount (₹)</th>
+            </tr>
+          </thead>
+          <tbody id="inv-items-tbody">
+            <!-- Dynamic lines -->
+          </tbody>
+        </table>
+
+        <!-- Totals & Balance Summary -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-top:10px;">
+          <div style="max-width:320px;">
+            <p style="font-size:0.75rem; font-weight:700; color:#4b5563; text-transform:uppercase;" data-i18n="inv_terms_title">Terms & Warranty:</p>
+            <p style="font-size:0.75rem; color:#6b7280; margin-top:2px;" id="inv-terms-text">Warranty valid for 30 days. No warranty on physical or liquid damage.</p>
+            <div id="inv-notes-box" style="margin-top:6px; font-size:0.78rem; color:#374151;">
+              <strong>Note:</strong> <span id="inv-notes-text">-</span>
+            </div>
+          </div>
+          <div style="min-width:240px; background:#f9fafb; padding:10px 14px; border-radius:8px; border:1px solid #e5e7eb;">
+            <div class="inv-totals-row">
+              <span data-i18n="bill_subtotal">Subtotal:</span>
+              <strong id="inv-subtotal">₹0.00</strong>
+            </div>
+            <div class="inv-totals-row" style="color:#dc2626;">
+              <span data-i18n="bill_discount">Discount:</span>
+              <strong id="inv-discount">-₹0.00</strong>
+            </div>
+            <div class="inv-totals-row" style="border-top:2px solid #e5e7eb; margin-top:4px; padding-top:6px; font-size:1.05rem;">
+              <span style="font-weight:800; color:#111827;" data-i18n="bill_grand_total">Grand Total:</span>
+              <strong style="font-weight:800; color:#2563eb;" id="inv-grand-total">₹0.00</strong>
+            </div>
+            <div class="inv-totals-row" style="color:#059669; margin-top:4px;">
+              <span data-i18n="bill_amount_paid">Paid Amount:</span>
+              <strong id="inv-paid">₹0.00</strong>
+            </div>
+            <div class="inv-totals-row" style="color:#dc2626; font-weight:700;">
+              <span data-i18n="bill_balance_due">Balance Due:</span>
+              <strong id="inv-due">₹0.00</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- Authorized Signature -->
+        <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-top:24px; padding-top:14px;">
+          <p style="font-size:0.75rem; color:#9ca3af;" data-i18n="inv_system_generated">Computer generated invoice • Patiraj Mobile Repair</p>
+          <div style="text-align:center; min-width:180px; border-top:1px solid #9ca3af; padding-top:4px;">
+            <p style="font-size:0.78rem; font-weight:700; color:#374151;" data-i18n="inv_authorized_signature">Authorized Signature</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Buttons -->
+      <div class="modal-actions no-print" style="margin-top:16px;">
+        <button type="button" class="btn-secondary" onclick="closeModal('invoiceModal')" data-i18n="btn_close">Close</button>
+        <button type="button" class="btn-secondary" onclick="shareInvoiceWhatsApp(currentActiveBillId)" style="background:#25D366; color:#fff; border-color:#25D366;" data-i18n="btn_whatsapp">💬 WhatsApp</button>
+        <button type="button" class="btn-secondary" onclick="downloadInvoicePDF()" data-i18n="btn_pdf">📥 Download PDF</button>
+        <button type="button" class="btn-primary" onclick="printInvoice()" data-i18n="btn_print">🖨️ Print Invoice</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Logout Confirmation Modal -->
+  <div class="modal-overlay" id="logoutConfirmModal">
+    <div class="modal-card" style="max-width:380px; text-align:center;">
+      <span style="font-size:2.4rem;">🚪</span>
+      <h3 style="font-size:1.15rem; font-weight:700; margin:10px 0 6px 0;" data-i18n="logout_title">Logout Confirmation</h3>
+      <p style="font-size:0.86rem; color:var(--muted); margin-bottom:18px;" data-i18n="logout_prompt">Are you sure you want to log out of your session?</p>
+      <div style="display:flex; gap:10px; justify-content:center;">
+        <button type="button" class="btn-secondary" onclick="closeModal('logoutConfirmModal')" data-i18n="btn_cancel">Cancel</button>
+        <a href="/logout" class="btn-danger" style="text-decoration:none; padding:8px 18px; font-size:0.88rem; border-radius:8px;" data-i18n="btn_confirm_logout">Yes, Logout</a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cancel Bill Confirmation Modal -->
+  <div class="modal-overlay" id="cancelBillConfirmModal">
+    <div class="modal-card" style="max-width:420px;">
+      <div class="modal-hdr">
+        <h3 style="font-size:1.1rem; font-weight:700; color:var(--danger);" data-i18n="cancel_bill_title">❌ Cancel Invoice & Refund</h3>
+        <button onclick="closeModal('cancelBillConfirmModal')" style="background:none; border:none; color:var(--muted); font-size:1.4rem; cursor:pointer;">&times;</button>
+      </div>
+      <p style="font-size:0.85rem; color:var(--muted); margin-bottom:12px;" data-i18n="cancel_bill_msg">
+        Cancelling this invoice will mark it as Cancelled and automatically return all billed parts back into inventory stock.
+      </p>
+      <div class="form-group">
+        <label data-i18n="cancel_reason_label">Cancellation / Refund Reason:</label>
+        <input type="text" id="cancel-bill-reason" class="form-control" placeholder="e.g. Customer returned part, billing error" value="Customer Return">
+      </div>
+      <div class="modal-actions">
+        <button type="button" class="btn-secondary" onclick="closeModal('cancelBillConfirmModal')" data-i18n="btn_keep_invoice">Keep Invoice</button>
+        <button type="button" class="btn-danger" onclick="submitCancelBill()" data-i18n="btn_confirm_cancel">Yes, Cancel & Return Stock</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ========================================================================= -->
   <!-- JAVASCRIPT LOGIC -->
   <!-- ========================================================================= -->
@@ -1215,8 +1942,324 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     let allPhonesCache = [];
     let soldRecordsCache = [];
     let currentPhoneFilter = 'all';
-    let activeBillData = {};
+    let currentLang = 'en';
+    let currentTheme = 'dark';
+    let posCart = [];
+    let currentInvoiceData = null;
+    let currentCancelBillId = null;
+    let customerLookupTimeout = null;
 
+    // =========================================================================
+    // 1. INTERNATIONALIZATION (I18N) - ENGLISH & HINDI
+    // =========================================================================
+    const I18N = {
+      en: {
+        nav_dashboard: "📊 Dashboard",
+        nav_billing: "🧾 Billing & Invoices",
+        nav_inventory: "📦 Inventory",
+        nav_low_stock: "⚠️ Low Stock Alert",
+        nav_stock_in_out: "🔄 Stock In/Out",
+        nav_phones: "📱 Repair Jobs",
+        nav_history: "📜 Sales History",
+        nav_reports: "📈 Reports",
+        nav_users: "👥 Users",
+        nav_audit: "🛡️ Audit Logs",
+        nav_settings: "⚙️ Settings",
+        btn_theme: "Theme",
+        btn_lang: "Language",
+        btn_logout: "Logout",
+
+        billing_title: "🧾 Billing & Invoicing",
+        billing_sub: "Quick point of sale for mobile parts, accessories & repair services",
+        btn_pos_tab: "➕ New Bill (POS)",
+        btn_history_tab: "📋 Invoice History",
+        cust_info_title: "👤 Customer Information",
+        cust_id_label: "Customer ID",
+        cust_phone_label: "Customer Phone",
+        cust_name_label: "Customer Name",
+        add_parts_title: "📦 Add Items & Spare Parts",
+        select_part_label: "Select Inventory Part",
+        qty_label: "Qty",
+        btn_add_part: "➕ Add to Bill",
+        btn_multi_items: "☑️ Multi-Items Picker",
+        btn_custom_item: "🛠️ Custom / Service Item",
+        cart_title: "🛒 Current Bill Items",
+        cart_col_item: "Item / Part",
+        cart_col_unit: "Unit Price",
+        cart_col_qty: "Quantity",
+        cart_col_total: "Total",
+        cart_col_action: "Action",
+        summary_title: "💳 Payment Summary",
+        lbl_subtotal: "Subtotal:",
+        lbl_discount: "Discount (₹):",
+        lbl_grand_total: "Grand Total:",
+        lbl_paid_amount: "Amount Paid (₹):",
+        lbl_balance_due: "Balance Due:",
+        lbl_payment_method: "Payment Method:",
+        lbl_notes: "Notes / Warranty Details:",
+        btn_finalize_bill: "💾 Finalize Bill & Print Invoice",
+
+        filter_period_today: "Today",
+        filter_period_month: "This Month",
+        filter_period_all: "All Time",
+        filter_status_all: "All Payment Status",
+        filter_status_paid: "Paid",
+        filter_status_unpaid: "Unpaid",
+        filter_status_partial: "Partially Paid",
+        filter_status_cancelled: "Cancelled",
+        btn_refresh_history: "🔄 Refresh",
+        col_inv_no: "Invoice #",
+        col_inv_date: "Date & Time",
+        col_inv_cust: "Customer",
+        col_inv_items: "Items",
+        col_inv_total: "Total",
+        col_inv_paid: "Paid / Due",
+        col_inv_status: "Status",
+        col_inv_action: "Actions",
+
+        settings_title: "⚙️ Application Settings",
+        settings_sub: "Configure appearance, language, shop profile, and account preferences",
+        appearance_title: "🎨 Appearance & Theme",
+        theme_dark_title: "Dark Mode",
+        theme_dark_sub: "Sleek high-contrast dark theme, ideal for low-light",
+        theme_light_title: "Light Mode",
+        theme_light_sub: "Clean, crisp light theme with vibrant colors",
+        language_title: "🌐 Language / भाषा",
+        lang_en_title: "English",
+        lang_en_sub: "Use English across the entire interface",
+        lang_hi_title: "हिन्दी (Hindi)",
+        lang_hi_sub: "संपूर्ण इंटरफ़ेस को हिन्दी में देखें",
+        account_title: "👤 Account & Session",
+        change_pass_title: "Change My Password",
+        lbl_curr_pass: "Current Password:",
+        lbl_new_pass: "New Password:",
+        lbl_confirm_pass: "Confirm New Password:",
+        btn_update_pass: "Update Password",
+        btn_logout_setting: "🚪 Logout of Application",
+        shop_settings_title: "🏪 Shop Profile & Invoice Details",
+        lbl_shop_name: "Shop Name:",
+        lbl_shop_phone: "Phone / Mobile Number:",
+        lbl_shop_email: "Email Address:",
+        lbl_shop_address: "Shop Address:",
+        lbl_shop_upi: "UPI ID / QR Payment Details:",
+        lbl_shop_terms: "Invoice Terms & Conditions / Footer Note:",
+        btn_save_settings: "💾 Save Shop Settings",
+
+        picker_title: "Select Items from Inventory",
+        btn_select_all: "Toggle Select All",
+        col_picker_part: "Part / Item Name",
+        col_picker_model: "Compatible Model",
+        col_picker_stock: "In Stock",
+        col_picker_price: "Selling Price",
+        btn_close: "Close",
+        btn_add_selected: "Add Selected Items to Bill",
+        custom_item_title: "Add Custom Service / Part",
+        lbl_custom_name: "Item / Service Description:",
+        lbl_custom_price: "Selling Price (₹):",
+        lbl_custom_cost: "Cost Price (Optional ₹):",
+        lbl_custom_qty: "Quantity:",
+        btn_cancel: "Cancel",
+        btn_add_to_bill: "Add to Bill",
+        btn_print: "🖨️ Print",
+        btn_pdf: "📄 Download PDF",
+        btn_whatsapp: "💬 Share via WhatsApp",
+        logout_confirm_title: "Confirm Logout",
+        logout_confirm_msg: "Are you sure you want to log out? Your saved inventory, bills, customers, and shop data will remain completely safe.",
+        btn_keep_logged_in: "No, Stay Logged In",
+        btn_confirm_logout: "Yes, Logout",
+        cancel_bill_title: "❌ Cancel Invoice & Refund",
+        cancel_bill_msg: "Cancelling this invoice will mark it as Cancelled and automatically return all billed parts back into inventory stock.",
+        cancel_reason_label: "Cancellation / Refund Reason:",
+        btn_keep_invoice: "Keep Invoice",
+        btn_confirm_cancel: "Yes, Cancel & Return Stock"
+      },
+      hi: {
+        nav_dashboard: "📊 डैशबोर्ड",
+        nav_billing: "🧾 बिलिंग और इनवॉइस",
+        nav_inventory: "📦 इन्वेंटरी",
+        nav_low_stock: "⚠️ लो स्टॉक अलर्ट",
+        nav_stock_in_out: "🔄 स्टॉक इन/आउट",
+        nav_phones: "📱 रिपेयरिंग जॉब्स",
+        nav_history: "📜 बिक्री इतिहास",
+        nav_reports: "📈 रिपोर्ट्स",
+        nav_users: "👥 यूज़र्स",
+        nav_audit: "🛡️ ऑडिट लॉग्स",
+        nav_settings: "⚙️ सेटिंग्स",
+        btn_theme: "थीम",
+        btn_lang: "भाषा",
+        btn_logout: "लॉगआउट",
+
+        billing_title: "🧾 बिलिंग और इनवॉइसिंग",
+        billing_sub: "मोबाइल पार्ट्स, एक्सेसरीज और रिपेयरिंग का आसान बिलिंग सिस्टम",
+        btn_pos_tab: "➕ नया बिल (POS)",
+        btn_history_tab: "📋 इनवॉइस इतिहास",
+        cust_info_title: "👤 ग्राहक विवरण",
+        cust_id_label: "ग्राहक आईडी",
+        cust_phone_label: "मोबाइल नंबर",
+        cust_name_label: "ग्राहक का नाम",
+        add_parts_title: "📦 आइटम और पार्ट्स जोड़ें",
+        select_part_label: "इन्वेंटरी पार्ट चुनें",
+        qty_label: "मात्रा",
+        btn_add_part: "➕ बिल में जोड़ें",
+        btn_multi_items: "☑️ मल्टी-आइटम चयन",
+        btn_custom_item: "🛠️ कस्टम / सर्विस आइटम",
+        cart_title: "🛒 वर्तमान बिल आइटम",
+        cart_col_item: "आइटम / पार्ट",
+        cart_col_unit: "इकाई मूल्य",
+        cart_col_qty: "मात्रा",
+        cart_col_total: "कुल",
+        cart_col_action: "कार्रवाई",
+        summary_title: "💳 भुगतान सारांश",
+        lbl_subtotal: "उप-योग:",
+        lbl_discount: "छूट (₹):",
+        lbl_grand_total: "कुल देय राशि:",
+        lbl_paid_amount: "जमा राशि (₹):",
+        lbl_balance_due: "शेष बकाया राशि:",
+        lbl_payment_method: "भुगतान का प्रकार:",
+        lbl_notes: "नोट्स / वारंटी विवरण:",
+        btn_finalize_bill: "💾 बिल सेव करें और इनवॉइस प्रिंट करें",
+
+        filter_period_today: "आज",
+        filter_period_month: "इस महीने",
+        filter_period_all: "सभी समय",
+        filter_status_all: "सभी स्थिति",
+        filter_status_paid: "पूर्ण भुगतान (Paid)",
+        filter_status_unpaid: "अदत्त (Unpaid)",
+        filter_status_partial: "आंशिक भुगतान",
+        filter_status_cancelled: "रद्द (Cancelled)",
+        btn_refresh_history: "🔄 रीफ़्रेश",
+        col_inv_no: "इनवॉइस #",
+        col_inv_date: "दिनांक एवं समय",
+        col_inv_cust: "ग्राहक",
+        col_inv_items: "आइटम",
+        col_inv_total: "कुल राशि",
+        col_inv_paid: "जमा / बकाया",
+        col_inv_status: "स्थिति",
+        col_inv_action: "कार्रवाई",
+
+        settings_title: "⚙️ एप्लिकेशन सेटिंग्स",
+        settings_sub: "थीम, भाषा, दुकान का विवरण और खाता प्राथमिकताएं कॉन्फ़िगर करें",
+        appearance_title: "🎨 थीम और रूप-रंग",
+        theme_dark_title: "डार्क मोड",
+        theme_dark_sub: "आंखों के लिए आरामदायक आधुनिक डार्क थीम",
+        theme_light_title: "लाइट मोड",
+        theme_light_sub: "साफ और स्पष्ट चमकदार लाइट थीम",
+        language_title: "🌐 भाषा / Language",
+        lang_en_title: "English",
+        lang_en_sub: "पूरे सॉफ्टवेयर में अंग्रेजी भाषा का उपयोग करें",
+        lang_hi_title: "हिन्दी (Hindi)",
+        lang_hi_sub: "संपूर्ण इंटरफ़ेस को हिन्दी में देखें",
+        account_title: "👤 खाता और सत्र",
+        change_pass_title: "अपना पासवर्ड बदलें",
+        lbl_curr_pass: "वर्तमान पासवर्ड:",
+        lbl_new_pass: "नया पासवर्ड:",
+        lbl_confirm_pass: "नया पासवर्ड पुनः दर्ज करें:",
+        btn_update_pass: "पासवर्ड अपडेट करें",
+        btn_logout_setting: "🚪 सॉफ्टवेयर से लॉगआउट करें",
+        shop_settings_title: "🏪 दुकान की जानकारी और इनवॉइस सेटिंग्स",
+        lbl_shop_name: "दुकान का नाम:",
+        lbl_shop_phone: "फोन / मोबाइल नंबर:",
+        lbl_shop_email: "ईमेल पता:",
+        lbl_shop_address: "दुकान का पता:",
+        lbl_shop_upi: "यूपीआई आईडी / क्यूआर विवरण:",
+        lbl_shop_terms: "इनवॉइस नियम व शर्तें / फुटर नोट:",
+        btn_save_settings: "💾 दुकान की जानकारी सुरक्षित करें",
+
+        picker_title: "इन्वेंटरी से आइटम चुनें",
+        btn_select_all: "सभी चुनें / हटाएं",
+        col_picker_part: "पार्ट / आइटम का नाम",
+        col_picker_model: "अनुकूल मॉडल",
+        col_picker_stock: "उपलब्ध स्टॉक",
+        col_picker_price: "बिक्री मूल्य",
+        btn_close: "बंद करें",
+        btn_add_selected: "चयनित आइटम बिल में जोड़ें",
+        custom_item_title: "कस्टम सर्विस या पार्ट जोड़ें",
+        lbl_custom_name: "आइटम या सर्विस का नाम:",
+        lbl_custom_price: "बिक्री मूल्य (₹):",
+        lbl_custom_cost: "लागत मूल्य (वैकल्पिक ₹):",
+        lbl_custom_qty: "मात्रा:",
+        btn_cancel: "रद्द करें",
+        btn_add_to_bill: "बिल में जोड़ें",
+        btn_print: "🖨️ प्रिंट करें",
+        btn_pdf: "📄 पीडीएफ डाउनलोड करें",
+        btn_whatsapp: "💬 व्हाट्सएप पर शेयर करें",
+        logout_confirm_title: "लॉगआउट की पुष्टि करें",
+        logout_confirm_msg: "क्या आप वाकई लॉगआउट करना चाहते हैं? आपकी सभी इन्वेंटरी, बिल, ग्राहक और डेटा पूरी तरह सुरक्षित रहेंगे।",
+        btn_keep_logged_in: "नहीं, लॉग-इन रहें",
+        btn_confirm_logout: "हाँ, लॉगआउट करें",
+        cancel_bill_title: "❌ इनवॉइस रद्द करें और रिफंड करें",
+        cancel_bill_msg: "इस इनवॉइस को रद्द करने पर यह रद्द चिह्नित हो जाएगी और सभी पार्ट्स स्वतः इन्वेंटरी स्टॉक में वापस जुड़ जाएंगे।",
+        cancel_reason_label: "रद्द / रिफंड का कारण:",
+        btn_keep_invoice: "इनवॉइस सुरक्षित रखें",
+        btn_confirm_cancel: "हाँ, रद्द करें और स्टॉक वापस लें"
+      }
+    };
+
+    function applyLanguage(lang) {
+      if (!I18N[lang]) lang = 'en';
+      currentLang = lang;
+      localStorage.setItem('patiraj_lang', lang);
+      document.documentElement.lang = lang;
+
+      const dict = I18N[lang];
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        if (dict[key]) {
+          el.textContent = dict[key];
+        }
+      });
+      document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+        const key = el.getAttribute('data-i18n-placeholder');
+        if (dict[key]) {
+          el.placeholder = dict[key];
+        }
+      });
+
+      // Update header button
+      const langBtn = document.getElementById('header-lang-btn');
+      if (langBtn) {
+        langBtn.innerHTML = `🌐 ${lang === 'hi' ? 'हिन्दी' : 'EN'}`;
+      }
+      const radio = document.getElementById(`lang-${lang}`);
+      if (radio) radio.checked = true;
+    }
+
+    function setLanguage(lang) {
+      applyLanguage(lang);
+      showToast(lang === 'hi' ? 'भाषा बदलकर हिन्दी कर दी गई है' : 'Language set to English');
+    }
+
+    function toggleLanguage() {
+      setLanguage(currentLang === 'hi' ? 'en' : 'hi');
+    }
+
+    // =========================================================================
+    // 2. THEME MANAGEMENT - DARK & LIGHT MODES
+    // =========================================================================
+    function setTheme(theme) {
+      if (theme !== 'light' && theme !== 'dark') theme = 'dark';
+      currentTheme = theme;
+      localStorage.setItem('patiraj_theme', theme);
+      document.documentElement.setAttribute('data-theme', theme);
+
+      const thBtn = document.getElementById('header-theme-btn');
+      if (thBtn) {
+        thBtn.innerHTML = theme === 'dark' ? '🌙' : '☀️';
+        thBtn.title = theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode';
+      }
+      const radio = document.getElementById(`theme-${theme}`);
+      if (radio) radio.checked = true;
+    }
+
+    function toggleTheme() {
+      const newTheme = (document.documentElement.getAttribute('data-theme') === 'light') ? 'dark' : 'light';
+      setTheme(newTheme);
+      showToast(newTheme === 'dark' ? 'Dark Mode Activated 🌙' : 'Light Mode Activated ☀️');
+    }
+
+    // =========================================================================
+    // 3. TOAST & NOTIFICATIONS
+    // =========================================================================
     function showToast(message, isError = false) {
       let toast = document.getElementById('app-toast');
       if (!toast) {
@@ -1244,16 +2287,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       }, 2500);
     }
 
+    // =========================================================================
+    // 4. NAVIGATION & TAB SWITCHING
+    // =========================================================================
     function switchTab(tabId) {
-      const tabs = ['dashboard', 'inventory', 'low_stock', 'stock_in_out', 'phones', 'history', 'reports', 'users', 'audit'];
-      
+      const tabs = ['dashboard', 'billing', 'inventory', 'low_stock', 'stock_in_out', 'phones', 'history', 'reports', 'users', 'audit', 'settings'];
+
       // Update top nav
       document.querySelectorAll('.nav-tab').forEach(el => {
         el.classList.toggle('active', el.id === 'nav-' + tabId);
       });
 
       // Update bottom nav
-      const bMap = {'dashboard':'btn-dash', 'inventory':'btn-inv', 'phones':'btn-phones', 'stock_in_out':'btn-stock', 'reports':'btn-rep'};
+      const bMap = {
+        'dashboard': 'btn-dash',
+        'billing': 'btn-billing',
+        'inventory': 'btn-inv',
+        'phones': 'btn-phones',
+        'stock_in_out': 'btn-stock',
+        'reports': 'btn-rep',
+        'settings': 'btn-settings'
+      };
       document.querySelectorAll('.bottom-tab').forEach(b => b.classList.remove('active'));
       if (bMap[tabId] && document.getElementById(bMap[tabId])) {
         document.getElementById(bMap[tabId]).classList.add('active');
@@ -1267,6 +2321,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
       // Trigger data loader
       if (tabId === 'dashboard') loadDashboardStats();
+      if (tabId === 'billing') initBillingTab();
       if (tabId === 'inventory') loadParts();
       if (tabId === 'low_stock') loadLowStock();
       if (tabId === 'stock_in_out') loadStockPartsList();
@@ -1275,6 +2330,27 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (tabId === 'reports') loadReports();
       if (tabId === 'users') loadUsers();
       if (tabId === 'audit') loadAuditLogs();
+      if (tabId === 'settings') loadShopSettings();
+    }
+
+    function switchBillingSubTab(sub) {
+      const posSec = document.getElementById('pos-section');
+      const histSec = document.getElementById('history-section');
+      const btnPos = document.getElementById('btn-subtab-pos');
+      const btnHist = document.getElementById('btn-subtab-history');
+
+      if (sub === 'pos') {
+        if (posSec) posSec.style.display = 'block';
+        if (histSec) histSec.style.display = 'none';
+        if (btnPos) btnPos.className = 'btn-primary';
+        if (btnHist) btnHist.className = 'btn-secondary';
+      } else {
+        if (posSec) posSec.style.display = 'none';
+        if (histSec) histSec.style.display = 'block';
+        if (btnPos) btnPos.className = 'btn-secondary';
+        if (btnHist) btnHist.className = 'btn-primary';
+        loadBillsHistory();
+      }
     }
 
     // Modal helpers
@@ -1283,6 +2359,702 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     function openAddUserModal() { document.getElementById('addUserModal').style.display = 'flex'; }
     function openRestoreModal() { document.getElementById('restoreModal').style.display = 'flex'; }
     function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+    function confirmLogout() { document.getElementById('logoutConfirmModal').style.display = 'flex'; }
+    function executeLogout() { window.location.href = '/logout'; }
+
+    // =========================================================================
+    // 5. BILLING SYSTEM & POS CART LOGIC
+    // =========================================================================
+    async function initBillingTab() {
+      if (!document.getElementById('pos-cust-id').value) {
+        generateNewCustomerId();
+      }
+      await populatePosPartsDropdown();
+      renderPosCart();
+    }
+
+    async function generateNewCustomerId() {
+      try {
+        const res = await fetch('/api/customers/next_id');
+        const data = await res.json();
+        if (data && data.next_id) {
+          document.getElementById('pos-cust-id').value = data.next_id;
+        }
+      } catch (err) {
+        console.error('Error fetching next customer ID:', err);
+      }
+    }
+
+    async function onCustomerPhoneOrNameInput() {
+      clearTimeout(customerLookupTimeout);
+      customerLookupTimeout = setTimeout(async () => {
+        const phone = (document.getElementById('pos-cust-phone').value || '').trim();
+        if (phone.length >= 4) {
+          try {
+            const res = await fetch('/api/customers?q=' + encodeURIComponent(phone));
+            const custs = await res.json();
+            if (custs && custs.length > 0) {
+              const match = custs.find(c => c.phone === phone) || custs[0];
+              if (match) {
+                document.getElementById('pos-cust-id').value = match.customer_id;
+                if (!document.getElementById('pos-cust-name').value) {
+                  document.getElementById('pos-cust-name').value = match.name;
+                }
+              }
+            }
+          } catch (e) {
+            console.warn('Customer lookup error:', e);
+          }
+        }
+      }, 350);
+    }
+
+    async function populatePosPartsDropdown() {
+      const select = document.getElementById('pos-part-select');
+      if (!select) return;
+      if (!allPartsCache || allPartsCache.length === 0) {
+        try {
+          const res = await fetch('/api/parts_list');
+          allPartsCache = await res.json();
+        } catch (e) {
+          console.error('Failed to load parts for POS', e);
+        }
+      }
+
+      const inStockParts = (allPartsCache || []).filter(p => p.quantity > 0);
+      select.innerHTML = '<option value="">-- Choose Spare Part or Item --</option>' +
+        inStockParts.map(p => `
+          <option value="${p.id}" data-name="${p.name}" data-price="${p.selling_price}" data-cost="${p.purchase_price}" data-stock="${p.quantity}">
+            ${p.name} (${p.model_compatible || 'Universal'}) - Stock: ${p.quantity} - ₹${Number(p.selling_price).toFixed(2)}
+          </option>
+        `).join('');
+    }
+
+    function addSinglePartToPosCart() {
+      const select = document.getElementById('pos-part-select');
+      const qtyInput = document.getElementById('pos-part-qty');
+      if (!select || !select.value) {
+        showToast('Please select a part to add', true);
+        return;
+      }
+      const partId = parseInt(select.value);
+      const qty = parseInt(qtyInput.value) || 1;
+      const opt = select.selectedOptions[0];
+      const name = opt.getAttribute('data-name');
+      const price = parseFloat(opt.getAttribute('data-price')) || 0;
+      const cost = parseFloat(opt.getAttribute('data-cost')) || 0;
+      const stock = parseInt(opt.getAttribute('data-stock')) || 0;
+
+      if (qty > stock) {
+        showToast(`Cannot add ${qty}. Only ${stock} available in stock!`, true);
+        return;
+      }
+
+      const existingIndex = posCart.findIndex(it => it.part_id === partId);
+      if (existingIndex >= 0) {
+        const newQty = posCart[existingIndex].quantity + qty;
+        if (newQty > stock) {
+          showToast(`Total quantity (${newQty}) exceeds stock (${stock})!`, true);
+          return;
+        }
+        posCart[existingIndex].quantity = newQty;
+        posCart[existingIndex].total = posCart[existingIndex].quantity * posCart[existingIndex].unit_price;
+      } else {
+        posCart.push({
+          part_id: partId,
+          item_name: name,
+          unit_price: price,
+          cost_price: cost,
+          quantity: qty,
+          max_stock: stock,
+          discount: 0,
+          total: qty * price
+        });
+      }
+
+      select.value = '';
+      qtyInput.value = '1';
+      showToast(`✔ Added "${name}" to bill!`);
+      renderPosCart();
+    }
+
+    function renderPosCart() {
+      const tbody = document.getElementById('pos-cart-tbody');
+      const emptyRow = document.getElementById('pos-cart-empty');
+      if (!tbody) return;
+
+      if (posCart.length === 0) {
+        if (emptyRow) emptyRow.style.display = 'table-row';
+        tbody.innerHTML = '';
+        calculateBillTotals();
+        return;
+      }
+
+      if (emptyRow) emptyRow.style.display = 'none';
+
+      tbody.innerHTML = posCart.map((it, idx) => `
+        <tr>
+          <td>
+            <strong>${it.item_name}</strong>
+            ${it.part_id ? `<div style="font-size:0.75rem; color:var(--muted);">Stock: ${it.max_stock} available</div>` : '<div style="font-size:0.75rem; color:var(--accent);">Custom Service/Item</div>'}
+          </td>
+          <td>
+            <input type="number" min="0" step="0.5" class="form-control" style="width:90px; padding:4px 6px; font-size:0.85rem;"
+                   value="${it.unit_price}" onchange="updatePosCartPrice(${idx}, this.value)">
+          </td>
+          <td>
+            <div class="qty-btn-group">
+              <button type="button" class="qty-btn" onclick="updatePosCartQty(${idx}, ${it.quantity - 1})">-</button>
+              <input type="number" min="1" ${it.max_stock ? `max="${it.max_stock}"` : ''} class="qty-input"
+                     value="${it.quantity}" onchange="updatePosCartQty(${idx}, parseInt(this.value)||1)">
+              <button type="button" class="qty-btn" onclick="updatePosCartQty(${idx}, ${it.quantity + 1})">+</button>
+            </div>
+          </td>
+          <td>
+            <strong style="color:var(--accent);">₹${Number(it.total).toFixed(2)}</strong>
+          </td>
+          <td>
+            <button type="button" class="btn-danger" style="padding:4px 8px; font-size:0.8rem;" onclick="removePosCartItem(${idx})">🗑️</button>
+          </td>
+        </tr>
+      `).join('');
+
+      calculateBillTotals();
+    }
+
+    function updatePosCartPrice(idx, newPrice) {
+      const price = Math.max(0, parseFloat(newPrice) || 0);
+      posCart[idx].unit_price = price;
+      posCart[idx].total = posCart[idx].quantity * price;
+      renderPosCart();
+    }
+
+    function updatePosCartQty(idx, newQty) {
+      if (newQty < 1) {
+        removePosCartItem(idx);
+        return;
+      }
+      const item = posCart[idx];
+      if (item.max_stock && newQty > item.max_stock) {
+        showToast(`Quantity limited to available stock (${item.max_stock})!`, true);
+        newQty = item.max_stock;
+      }
+      item.quantity = newQty;
+      item.total = item.quantity * item.unit_price;
+      renderPosCart();
+    }
+
+    function removePosCartItem(idx) {
+      posCart.splice(idx, 1);
+      renderPosCart();
+      showToast('Item removed from bill');
+    }
+
+    function calculateBillTotals() {
+      const subtotal = posCart.reduce((sum, it) => sum + (it.total || 0), 0);
+      const discountInput = document.getElementById('pos-discount');
+      const discount = Math.max(0, parseFloat(discountInput ? discountInput.value : 0) || 0);
+      const grandTotal = Math.max(0, subtotal - discount);
+
+      const subDisplay = document.getElementById('pos-subtotal-display');
+      const grandDisplay = document.getElementById('pos-grand-total-display');
+      if (subDisplay) subDisplay.textContent = '₹' + subtotal.toFixed(2);
+      if (grandDisplay) grandDisplay.textContent = '₹' + grandTotal.toFixed(2);
+
+      const paidInput = document.getElementById('pos-paid-amount');
+      let paidAmount = parseFloat(paidInput ? paidInput.value : 0);
+      if (isNaN(paidAmount) || paidAmount < 0) paidAmount = 0;
+
+      const balanceDue = Math.max(0, grandTotal - paidAmount);
+      const balDisplay = document.getElementById('pos-balance-display');
+      const balRow = document.getElementById('pos-balance-row');
+      if (balDisplay) {
+        balDisplay.textContent = '₹' + balanceDue.toFixed(2);
+        if (balanceDue <= 0.01) {
+          balDisplay.style.color = 'var(--success)';
+          if (balRow) balRow.style.color = 'var(--success)';
+        } else {
+          balDisplay.style.color = 'var(--danger)';
+          if (balRow) balRow.style.color = 'var(--danger)';
+        }
+      }
+    }
+
+    // =========================================================================
+    // 6. MULTI-ITEM PICKER & CUSTOM ITEMS
+    // =========================================================================
+    let multiPickerPartsList = [];
+
+    async function openMultiItemPickerModal() {
+      if (!allPartsCache || allPartsCache.length === 0) {
+        try {
+          const res = await fetch('/api/parts_list');
+          allPartsCache = await res.json();
+        } catch (e) {
+          console.error(e);
+        }
+      }
+      multiPickerPartsList = (allPartsCache || []).filter(p => p.quantity > 0);
+      renderMultiPickerTable(multiPickerPartsList);
+      document.getElementById('multiItemPickerModal').style.display = 'flex';
+    }
+
+    function filterMultiPickerParts() {
+      const q = (document.getElementById('multi-picker-search').value || '').toLowerCase().trim();
+      const filtered = multiPickerPartsList.filter(p =>
+        p.name.toLowerCase().includes(q) ||
+        (p.model_compatible && p.model_compatible.toLowerCase().includes(q))
+      );
+      renderMultiPickerTable(filtered);
+    }
+
+    function renderMultiPickerTable(parts) {
+      const tbody = document.getElementById('multi-picker-tbody');
+      if (!tbody) return;
+      if (parts.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:18px; color:var(--muted);">No matching in-stock parts found.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = parts.map(p => {
+        const inCart = posCart.some(it => it.part_id === p.id);
+        return `
+          <tr>
+            <td style="text-align:center;">
+              <input type="checkbox" class="picker-item-checkbox" data-id="${p.id}" ${inCart ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;">
+            </td>
+            <td><strong>${p.name}</strong></td>
+            <td>${p.model_compatible || 'Universal'}</td>
+            <td><span class="badge ${p.quantity <= (p.min_stock_alert||2)?'badge-low':'badge-ready'}">${p.quantity}</span></td>
+            <td><strong style="color:var(--accent);">₹${Number(p.selling_price).toFixed(2)}</strong></td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function toggleSelectAllMultiPicker() {
+      const checkboxes = document.querySelectorAll('.picker-item-checkbox');
+      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+      checkboxes.forEach(cb => cb.checked = !allChecked);
+    }
+
+    function addSelectedItemsFromPicker() {
+      const checkboxes = document.querySelectorAll('.picker-item-checkbox:checked');
+      if (checkboxes.length === 0) {
+        showToast('No items selected!', true);
+        return;
+      }
+      let addedCount = 0;
+      checkboxes.forEach(cb => {
+        const partId = parseInt(cb.getAttribute('data-id'));
+        const part = allPartsCache.find(p => p.id === partId);
+        if (part) {
+          const existing = posCart.find(it => it.part_id === partId);
+          if (!existing) {
+            posCart.push({
+              part_id: part.id,
+              item_name: part.name,
+              unit_price: parseFloat(part.selling_price) || 0,
+              cost_price: parseFloat(part.purchase_price) || 0,
+              quantity: 1,
+              max_stock: part.quantity,
+              discount: 0,
+              total: parseFloat(part.selling_price) || 0
+            });
+            addedCount++;
+          }
+        }
+      });
+
+      closeModal('multiItemPickerModal');
+      renderPosCart();
+      showToast(`✔ Added ${addedCount} item(s) to bill!`);
+    }
+
+    function openCustomItemModal() {
+      document.getElementById('custom-item-name').value = '';
+      document.getElementById('custom-item-price').value = '';
+      document.getElementById('custom-item-cost').value = '';
+      document.getElementById('custom-item-qty').value = '1';
+      document.getElementById('customItemModal').style.display = 'flex';
+    }
+
+    function submitCustomItem(e) {
+      e.preventDefault();
+      const name = document.getElementById('custom-item-name').value.trim();
+      const price = parseFloat(document.getElementById('custom-item-price').value) || 0;
+      const cost = parseFloat(document.getElementById('custom-item-cost').value) || 0;
+      const qty = parseInt(document.getElementById('custom-item-qty').value) || 1;
+
+      if (!name) {
+        showToast('Item description is required', true);
+        return;
+      }
+
+      posCart.push({
+        part_id: null,
+        item_name: name,
+        unit_price: price,
+        cost_price: cost,
+        quantity: qty,
+        max_stock: null,
+        discount: 0,
+        total: qty * price
+      });
+
+      closeModal('customItemModal');
+      renderPosCart();
+      showToast(`✔ Added "${name}" to bill!`);
+    }
+
+    // =========================================================================
+    // 7. FINALIZE BILL & CREATE INVOICE
+    // =========================================================================
+    async function finalizeBill() {
+      if (posCart.length === 0) {
+        showToast('Please add at least one item to the bill before finalizing.', true);
+        return;
+      }
+
+      const custName = (document.getElementById('pos-cust-name').value || 'Walk-in Customer').trim();
+      const custPhone = (document.getElementById('pos-cust-phone').value || '').trim();
+      const custId = (document.getElementById('pos-cust-id').value || '').trim();
+      const payMethod = document.getElementById('pos-payment-method').value;
+      const notes = document.getElementById('pos-notes').value.trim();
+
+      const subtotal = posCart.reduce((sum, it) => sum + (it.total || 0), 0);
+      const discount = Math.max(0, parseFloat(document.getElementById('pos-discount').value) || 0);
+      const grandTotal = Math.max(0, subtotal - discount);
+      let paidAmount = parseFloat(document.getElementById('pos-paid-amount').value);
+      if (isNaN(paidAmount)) paidAmount = grandTotal;
+
+      if (!confirm(`Generate Bill for ${custName}?\nTotal: ₹${grandTotal.toFixed(2)}\nPaid: ₹${paidAmount.toFixed(2)}`)) {
+        return;
+      }
+
+      const payload = {
+        customer_id: custId,
+        customer_name: custName,
+        customer_phone: custPhone,
+        subtotal: subtotal,
+        discount: discount,
+        grand_total: grandTotal,
+        paid_amount: paidAmount,
+        payment_method: payMethod,
+        notes: notes,
+        items: posCart
+      };
+
+      showToast('Creating invoice and updating stock...');
+
+      try {
+        const res = await fetch('/api/bills/create', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const result = await res.json();
+        if (result.success) {
+          showToast(`✔ Invoice #${result.invoice_no} generated successfully!`);
+          posCart = [];
+          renderPosCart();
+          document.getElementById('pos-cust-name').value = '';
+          document.getElementById('pos-cust-phone').value = '';
+          document.getElementById('pos-discount').value = '0';
+          document.getElementById('pos-paid-amount').value = '0';
+          document.getElementById('pos-notes').value = '';
+          generateNewCustomerId();
+
+          try {
+            const partsRes = await fetch('/api/parts_list');
+            allPartsCache = await partsRes.json();
+            populatePosPartsDropdown();
+          } catch (e) {}
+
+          viewInvoice(result.bill_id);
+        } else {
+          showToast('Error: ' + (result.error || 'Failed to generate bill'), true);
+        }
+      } catch (err) {
+        showToast('Network error while creating bill: ' + err, true);
+      }
+    }
+
+    // =========================================================================
+    // 8. BILL HISTORY, INVOICE PREVIEW, PRINT & SHARE
+    // =========================================================================
+    async function loadBillsHistory() {
+      const tbody = document.getElementById('bills-history-tbody');
+      if (!tbody) return;
+      const q = (document.getElementById('history-search-input') ? document.getElementById('history-search-input').value : '').trim();
+      const period = document.getElementById('history-period-select') ? document.getElementById('history-period-select').value : 'all';
+      const status = document.getElementById('history-status-select') ? document.getElementById('history-status-select').value : 'all';
+
+      try {
+        const url = `/api/bills?q=${encodeURIComponent(q)}&period=${encodeURIComponent(period)}&status=${encodeURIComponent(status)}`;
+        const res = await fetch(url);
+        const bills = await res.json();
+
+        if (!bills || bills.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--muted); padding:24px;">No invoices found matching criteria.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = bills.map(b => {
+          let badgeClass = 'badge-paid';
+          if (b.status === 'Cancelled') badgeClass = 'badge-cancelled';
+          else if (b.payment_status === 'Unpaid') badgeClass = 'badge-unpaid';
+          else if (b.payment_status === 'Partially Paid') badgeClass = 'badge-partial';
+
+          return `
+            <tr>
+              <td><strong style="color:var(--accent);">${b.invoice_no}</strong></td>
+              <td style="font-size:0.8rem; color:var(--muted);">${b.created_at}</td>
+              <td>
+                <strong>${b.customer_name}</strong>
+                <div style="font-size:0.75rem; color:var(--muted);">${b.customer_id ? `[${b.customer_id}] ` : ''}${b.customer_phone || ''}</div>
+              </td>
+              <td><span class="badge" style="background:var(--card-bg); border:1px solid var(--border-color);">${b.item_count || 1} items</span></td>
+              <td><strong style="color:var(--text-color);">₹${Number(b.grand_total).toFixed(2)}</strong></td>
+              <td style="font-size:0.82rem;">
+                <div style="color:var(--success);">Paid: ₹${Number(b.paid_amount).toFixed(2)}</div>
+                ${b.balance_due > 0 ? `<div style="color:var(--danger); font-weight:700;">Due: ₹${Number(b.balance_due).toFixed(2)}</div>` : ''}
+              </td>
+              <td><span class="badge ${badgeClass}">${b.status === 'Cancelled' ? 'CANCELLED' : b.payment_status.toUpperCase()}</span></td>
+              <td>
+                <div style="display:flex; gap:4px; flex-wrap:wrap;">
+                  <button class="btn-primary" style="padding:4px 8px; font-size:0.78rem;" onclick="viewInvoice(${b.id})">👁️ View</button>
+                  <button class="btn-secondary" style="padding:4px 8px; font-size:0.78rem;" onclick="shareInvoiceWhatsAppDirect(${b.id}, '${b.invoice_no}', '${b.customer_name}', '${b.customer_phone||''}', ${b.grand_total}, ${b.balance_due})">💬 WA</button>
+                  ${b.status !== 'Cancelled' ? `<button class="btn-danger" style="padding:4px 8px; font-size:0.78rem;" onclick="openCancelBillModal(${b.id})">❌</button>` : ''}
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+      } catch (err) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--danger); padding:24px;">Failed to load invoices.</td></tr>';
+      }
+    }
+
+    async function viewInvoice(billId) {
+      try {
+        const res = await fetch(`/api/bills/${billId}`);
+        const data = await res.json();
+        if (!data || !data.bill) {
+          showToast('Invoice details not found', true);
+          return;
+        }
+        currentInvoiceData = data;
+        const b = data.bill;
+        const shop = data.shop || {};
+        const items = data.items || [];
+
+        document.getElementById('inv-shop-name').textContent = shop.shop_name || 'Patiraj Mobile Repair Shop';
+        document.getElementById('inv-shop-address').textContent = shop.shop_address || 'Main Road, Mobile Market';
+        document.getElementById('inv-shop-phone').textContent = 'Phone: ' + (shop.shop_phone || '+91 9876543210');
+        document.getElementById('inv-shop-email').textContent = shop.shop_email ? 'Email: ' + shop.shop_email : '';
+
+        document.getElementById('inv-number').textContent = b.invoice_no;
+        document.getElementById('inv-date').textContent = b.created_at;
+        const statusBadge = document.getElementById('inv-status-badge');
+        statusBadge.textContent = b.status === 'Cancelled' ? 'CANCELLED' : b.payment_status.toUpperCase();
+        statusBadge.className = 'badge ' + (b.status === 'Cancelled' ? 'badge-cancelled' : (b.payment_status === 'Paid' ? 'badge-paid' : 'badge-unpaid'));
+
+        document.getElementById('inv-cust-name').textContent = b.customer_name;
+        document.getElementById('inv-cust-phone').textContent = b.customer_phone || '-';
+        document.getElementById('inv-cust-id').textContent = b.customer_id || '-';
+
+        const itemsTbody = document.getElementById('inv-items-tbody');
+        itemsTbody.innerHTML = items.map((it, idx) => `
+          <tr>
+            <td style="text-align:center;">${idx + 1}</td>
+            <td><strong>${it.item_name}</strong></td>
+            <td style="text-align:center;">${it.quantity}</td>
+            <td style="text-align:right;">₹${Number(it.unit_price).toFixed(2)}</td>
+            <td style="text-align:right;"><strong>₹${Number(it.total_price).toFixed(2)}</strong></td>
+          </tr>
+        `).join('');
+
+        document.getElementById('inv-subtotal').textContent = '₹' + Number(b.subtotal).toFixed(2);
+        document.getElementById('inv-discount').textContent = '₹' + Number(b.discount).toFixed(2);
+        document.getElementById('inv-grand-total').textContent = '₹' + Number(b.grand_total).toFixed(2);
+        document.getElementById('inv-paid').textContent = '₹' + Number(b.paid_amount).toFixed(2);
+        document.getElementById('inv-balance').textContent = '₹' + Number(b.balance_due).toFixed(2);
+        document.getElementById('inv-payment-method').textContent = b.payment_method || 'Cash';
+        document.getElementById('inv-notes').textContent = b.notes || 'Thank you for your business!';
+        document.getElementById('inv-terms').textContent = shop.shop_terms || 'Warranty valid only with this original invoice.';
+
+        document.getElementById('invoiceModal').style.display = 'flex';
+      } catch (e) {
+        showToast('Failed to load invoice details: ' + e, true);
+      }
+    }
+
+    function printInvoice() {
+      window.print();
+    }
+
+    function downloadInvoicePDF() {
+      window.print();
+    }
+
+    function shareInvoiceWhatsApp() {
+      if (!currentInvoiceData || !currentInvoiceData.bill) return;
+      const b = currentInvoiceData.bill;
+      const shop = currentInvoiceData.shop || {};
+      const items = currentInvoiceData.items || [];
+
+      let itemsText = items.map(it => `• ${it.item_name} (x${it.quantity}) - ₹${Number(it.total_price).toFixed(2)}`).join('\n');
+      let msg = `🧾 *${shop.shop_name || 'Patiraj Mobile Repair Shop'}*\n` +
+                `📄 *Invoice #:* ${b.invoice_no}\n` +
+                `📅 *Date:* ${b.created_at}\n` +
+                `👤 *Customer:* ${b.customer_name} (${b.customer_id || 'ID: -'})\n\n` +
+                `*Items:*\n${itemsText}\n\n` +
+                `💵 *Total:* ₹${Number(b.grand_total).toFixed(2)}\n` +
+                `✅ *Paid:* ₹${Number(b.paid_amount).toFixed(2)}\n` +
+                `⚠️ *Balance Due:* ₹${Number(b.balance_due).toFixed(2)}\n` +
+                `💳 *Payment:* ${b.payment_status} (${b.payment_method})\n\n` +
+                `📞 *Contact:* ${shop.shop_phone || ''}\n` +
+                `Thank you for visiting us!`;
+
+      let cleanPhone = (b.customer_phone || '').replace(/[^0-9]/g, '');
+      if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+
+      const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+      window.open(url, '_blank');
+      showToast('Opening WhatsApp to share invoice...');
+    }
+
+    function shareInvoiceWhatsAppDirect(id, invNo, custName, custPhone, total, balance) {
+      let cleanPhone = (custPhone || '').replace(/[^0-9]/g, '');
+      if (cleanPhone.length === 10) cleanPhone = '91' + cleanPhone;
+
+      let msg = `🧾 *Patiraj Mobile Repair Shop*\n` +
+                `📄 *Invoice #:* ${invNo}\n` +
+                `👤 *Customer:* ${custName}\n` +
+                `💵 *Total Amount:* ₹${Number(total).toFixed(2)}\n` +
+                `⚠️ *Balance Due:* ₹${Number(balance).toFixed(2)}\n\n` +
+                `Thank you for choosing Patiraj Mobile Repair Shop!`;
+
+      const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}` : `https://wa.me/?text=${encodeURIComponent(msg)}`;
+      window.open(url, '_blank');
+    }
+
+    function openCancelBillModal(billId) {
+      currentCancelBillId = billId;
+      document.getElementById('cancel-bill-reason').value = 'Customer Return / Billing Adjustment';
+      document.getElementById('cancelBillConfirmModal').style.display = 'flex';
+    }
+
+    async function submitCancelBill() {
+      if (!currentCancelBillId) return;
+      const reason = document.getElementById('cancel-bill-reason').value.trim();
+      closeModal('cancelBillConfirmModal');
+      showToast('Cancelling invoice and restoring stock...');
+
+      try {
+        const res = await fetch('/api/bills/cancel', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({bill_id: currentCancelBillId, reason: reason})
+        });
+        const result = await res.json();
+        if (result.success) {
+          showToast('✔ Invoice cancelled & items restored to inventory!');
+          loadBillsHistory();
+          if (document.getElementById('invoiceModal').style.display === 'flex') {
+            viewInvoice(currentCancelBillId);
+          }
+        } else {
+          showToast('Error: ' + (result.error || 'Failed to cancel bill'), true);
+        }
+      } catch (e) {
+        showToast('Network error while cancelling bill: ' + e, true);
+      }
+    }
+
+    // =========================================================================
+    // 9. SETTINGS MANAGEMENT
+    // =========================================================================
+    async function loadShopSettings() {
+      try {
+        const res = await fetch('/api/settings');
+        const data = await res.json();
+        const settings = (data && data.settings) ? data.settings : (data || {});
+        if (settings) {
+          if (document.getElementById('set-shop-name')) document.getElementById('set-shop-name').value = settings.shop_name || '';
+          if (document.getElementById('set-shop-phone')) document.getElementById('set-shop-phone').value = settings.shop_phone || '';
+          if (document.getElementById('set-shop-email')) document.getElementById('set-shop-email').value = settings.shop_email || '';
+          if (document.getElementById('set-shop-address')) document.getElementById('set-shop-address').value = settings.shop_address || '';
+          if (document.getElementById('set-shop-upi')) document.getElementById('set-shop-upi').value = settings.shop_upi || '';
+          if (document.getElementById('set-shop-terms')) document.getElementById('set-shop-terms').value = settings.shop_terms || settings.invoice_terms || '';
+        }
+      } catch (e) {
+        console.error('Error loading shop settings:', e);
+      }
+    }
+
+    async function submitSaveShopSettings(e) {
+      e.preventDefault();
+      const payload = {
+        shop_name: document.getElementById('set-shop-name').value,
+        shop_phone: document.getElementById('set-shop-phone').value,
+        shop_email: document.getElementById('set-shop-email').value,
+        shop_address: document.getElementById('set-shop-address').value,
+        shop_upi: document.getElementById('set-shop-upi').value,
+        shop_terms: document.getElementById('set-shop-terms').value
+      };
+
+      try {
+        const res = await fetch('/api/settings', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✔ Shop settings & invoice profile saved!');
+        } else {
+          showToast('Error: ' + (data.error || 'Failed to save settings'), true);
+        }
+      } catch (err) {
+        showToast('Network error saving settings: ' + err, true);
+      }
+    }
+
+    async function submitChangeMyPassword(e) {
+      e.preventDefault();
+      const curr = document.getElementById('my-curr-pass').value;
+      const newP = document.getElementById('my-new-pass').value;
+      const conf = document.getElementById('my-confirm-pass').value;
+
+      if (newP !== conf) {
+        showToast('New passwords do not match!', true);
+        return;
+      }
+      if (newP.length < 6) {
+        showToast('Password must be at least 6 characters!', true);
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/change_my_password', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({current_password: curr, new_password: newP})
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('✔ Password updated successfully!');
+          document.getElementById('my-curr-pass').value = '';
+          document.getElementById('my-new-pass').value = '';
+          document.getElementById('my-confirm-pass').value = '';
+        } else {
+          showToast('Error: ' + (data.error || 'Failed to update password'), true);
+        }
+      } catch (err) {
+        showToast('Network error updating password', true);
+      }
+    }
 
     // -------------------------------------------------------------------------
     // DASHBOARD
@@ -1920,7 +3692,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     function sendBillWhatsApp() {
       const p = activeBillData;
       if (!p) return;
-      const cleanPhone = (p.customer_phone || p.phone_number || '').replace(/\D/g, '');
+      const cleanPhone = (p.customer_phone || p.phone_number || '').replace(/[^0-9]/g, '');
       const msg = `नमस्ते ${p.customer_name || 'Customer'} जी,%0A%0A*PATIRAJ MOBILE REPAIR SHOP*%0AJob ID: #${p.id}%0ADevice: ${p.phone_model}%0AProblem: ${p.problem || '-'}%0AStatus: *${p.status}*%0ATotal Amount: *₹${Number(p.estimated_charge || 0).toFixed(2)}*%0A%0AAapka phone repair ho gaya hai. Kripya shop par aakar collect karein. Dhanyawad!`;
       const url = cleanPhone ? `https://wa.me/91${cleanPhone}?text=${msg}` : `https://wa.me/?text=${msg}`;
       window.open(url, '_blank');
@@ -2191,8 +3963,32 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       });
     }
 
-    // Initial load
-    loadDashboardStats();
+    // =========================================================================
+    // 10. APPLICATION INITIALIZATION
+    // =========================================================================
+    document.addEventListener('DOMContentLoaded', () => {
+      // Restore Theme (Dark / Light)
+      const savedTheme = localStorage.getItem('patiraj_theme') || 'dark';
+      setTheme(savedTheme);
+
+      // Restore Language (English / Hindi)
+      const savedLang = localStorage.getItem('patiraj_lang') || 'en';
+      applyLanguage(savedLang);
+
+      // Realtime calculation listeners for Billing
+      const discIn = document.getElementById('pos-discount');
+      if (discIn) discIn.addEventListener('input', calculateBillTotals);
+      const paidIn = document.getElementById('pos-paid-amount');
+      if (paidIn) paidIn.addEventListener('input', calculateBillTotals);
+
+      // Customer Phone input autocomplete
+      const phoneIn = document.getElementById('pos-cust-phone');
+      if (phoneIn) phoneIn.addEventListener('input', onCustomerPhoneOrNameInput);
+
+      // Initial stats & preloads
+      loadDashboardStats();
+      loadShopSettings();
+    });
   </script>
 </body>
 </html>
@@ -2472,6 +4268,7 @@ def api_sold_records():
     return jsonify(records)
 
 @app.route("/api/parts")
+@app.route("/api/parts_list")
 def api_parts():
     if "user_id" not in session:
         return jsonify({"error": "Unauthorized"}), 401
@@ -2961,6 +4758,322 @@ def api_backup_upload():
     f.save(DB_FILE)
     log_audit("DATABASE_RESTORE", "system", "", "Database restored from uploaded backup file")
     return jsonify({"success": True})
+
+# -----------------------------------------------------------------------------
+# SETTINGS & PREFERENCES APIS
+# -----------------------------------------------------------------------------
+@app.route("/api/settings", methods=["GET", "POST"])
+def api_settings():
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = get_db()
+    if request.method == "POST":
+        data = request.get_json() or {}
+        is_admin = session.get("role") == "admin"
+        for k, v in data.items():
+            if not is_admin and k not in ("theme", "language"):
+                continue
+            conn.execute("""INSERT INTO shop_settings(setting_key, setting_value) VALUES(?,?) 
+                            ON CONFLICT(setting_key) DO UPDATE SET setting_value=excluded.setting_value""", 
+                         (k, str(v)))
+        conn.commit()
+        log_audit("UPDATE_SETTINGS", "settings", "", f"Updated settings: {list(data.keys())}")
+        
+    rows = conn.execute("SELECT setting_key, setting_value FROM shop_settings").fetchall()
+    conn.close()
+    settings_dict = {r["setting_key"]: r["setting_value"] for r in rows}
+    return jsonify({"success": True, "settings": settings_dict})
+
+@app.route("/api/change_my_password", methods=["POST"])
+def api_change_my_password():
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    uid = session["user_id"]
+    data = request.get_json() or {}
+    new_pwd = (data.get("new_password") or "").strip()
+    if not new_pwd or len(new_pwd) < 6:
+        return jsonify({"success": False, "error": "New password must be at least 6 characters"}), 400
+    pwd_hash, salt = hash_password(new_pwd)
+    conn = get_db()
+    conn.execute("UPDATE users SET password_hash=?, salt=? WHERE id=?", (pwd_hash, salt, uid))
+    conn.commit()
+    conn.close()
+    log_audit("CHANGE_OWN_PASSWORD", "user", uid, f"User #{uid} updated their password")
+    return jsonify({"success": True})
+
+# -----------------------------------------------------------------------------
+# CUSTOMERS APIS
+# -----------------------------------------------------------------------------
+@app.route("/api/customers")
+def api_customers():
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    q = request.args.get("q", "").strip()
+    conn = get_db()
+    if q:
+        pat = f"%{q}%"
+        rows = conn.execute("""SELECT * FROM customers 
+                               WHERE customer_id LIKE ? OR name LIKE ? OR phone LIKE ? 
+                               ORDER BY id DESC LIMIT 50""", (pat, pat, pat)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM customers ORDER BY id DESC LIMIT 50").fetchall()
+    conn.close()
+    return jsonify([dict(r) for r in rows])
+
+@app.route("/api/customers/next_id")
+def api_customers_next_id():
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = get_db()
+    row = conn.execute("SELECT MAX(id) m FROM customers").fetchone()
+    next_num = (row["m"] or 0) + 1
+    cand = f"CUST-{1000 + next_num}"
+    existing = conn.execute("SELECT customer_id FROM customers WHERE customer_id=?", (cand,)).fetchone()
+    while existing:
+        next_num += 1
+        cand = f"CUST-{1000 + next_num}"
+        existing = conn.execute("SELECT customer_id FROM customers WHERE customer_id=?", (cand,)).fetchone()
+    conn.close()
+    return jsonify({"next_id": cand})
+
+# -----------------------------------------------------------------------------
+# BILLING & INVOICES APIS
+# -----------------------------------------------------------------------------
+@app.route("/api/bills")
+def api_bills():
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    q = request.args.get("q", "").strip()
+    period = request.args.get("period", "all")
+    status = request.args.get("status", "all")
+
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    month_str = datetime.now().strftime("%Y-%m")
+
+    conn = get_db()
+    query = """SELECT b.*, 
+                      (SELECT COUNT(*) FROM bill_items bi WHERE bi.bill_id = b.id) as item_count 
+               FROM bills b WHERE 1=1"""
+    params = []
+
+    if q:
+        pat = f"%{q}%"
+        query += " AND (b.invoice_no LIKE ? OR b.customer_name LIKE ? OR b.customer_phone LIKE ? OR b.customer_id LIKE ?)"
+        params.extend([pat, pat, pat, pat])
+
+    if period == "today":
+        query += " AND substr(b.created_at, 1, 10) = ?"
+        params.append(today_str)
+    elif period == "month":
+        query += " AND substr(b.created_at, 1, 7) = ?"
+        params.append(month_str)
+
+    if status != "all":
+        query += " AND b.payment_status = ?"
+        params.append(status)
+
+    query += " ORDER BY b.id DESC LIMIT 150"
+    rows = conn.execute(query, params).fetchall()
+
+    stats_row = conn.execute("""
+        SELECT COALESCE(SUM(grand_total), 0) total_billed,
+               COALESCE(SUM(paid_amount), 0) total_collected,
+               COALESCE(SUM(balance_due), 0) total_due,
+               COUNT(*) count_bills
+        FROM bills WHERE status != 'Cancelled'
+    """).fetchone()
+
+    conn.close()
+    return jsonify({
+        "bills": [dict(r) for r in rows],
+        "summary": {
+            "total_billed": float(stats_row["total_billed"]),
+            "total_collected": float(stats_row["total_collected"]),
+            "total_due": float(stats_row["total_due"]),
+            "count_bills": int(stats_row["count_bills"])
+        }
+    })
+
+@app.route("/api/bills/<int:bill_id>")
+def api_bill_detail(bill_id):
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    conn = get_db()
+    bill = conn.execute("SELECT * FROM bills WHERE id = ?", (bill_id,)).fetchone()
+    if not bill:
+        conn.close()
+        return jsonify({"error": "Bill not found"}), 404
+
+    items = conn.execute("SELECT * FROM bill_items WHERE bill_id = ? ORDER BY id ASC", (bill_id,)).fetchall()
+    settings_rows = conn.execute("SELECT setting_key, setting_value FROM shop_settings").fetchall()
+    conn.close()
+
+    settings_dict = {r["setting_key"]: r["setting_value"] for r in settings_rows}
+    return jsonify({
+        "bill": dict(bill),
+        "items": [dict(it) for it in items],
+        "shop": settings_dict
+    })
+
+@app.route("/api/bills/create", methods=["POST"])
+def api_create_bill():
+    if "user_id" not in session:
+        return jsonify({"error": "Unauthorized"}), 401
+    data = request.get_json() or {}
+    cust_name = (data.get("customer_name") or "").strip()
+    cust_phone = (data.get("customer_phone") or "").strip()
+    cust_id = (data.get("customer_id") or "").strip()
+    items = data.get("items") or []
+
+    if not cust_name:
+        return jsonify({"success": False, "error": "Customer name is required"}), 400
+    if not items:
+        return jsonify({"success": False, "error": "At least one item is required to generate a bill"}), 400
+
+    now_dt = datetime.now()
+    now_str = now_dt.strftime("%Y-%m-%d %H:%M:%S")
+    date_code = now_dt.strftime("%Y%m%d")
+
+    conn = get_db()
+    try:
+        # 1. Validate stock availability for all inventory items
+        for it in items:
+            part_id = it.get("part_id")
+            qty = int(it.get("quantity") or 1)
+            if qty <= 0:
+                conn.close()
+                return jsonify({"success": False, "error": f"Invalid quantity for {it.get('item_name')}"}), 400
+            if part_id:
+                p_row = conn.execute("SELECT name, quantity, purchase_price FROM parts WHERE id = ?", (part_id,)).fetchone()
+                if not p_row:
+                    conn.close()
+                    return jsonify({"success": False, "error": f"Part #{part_id} not found in inventory"}), 404
+                if p_row["quantity"] < qty:
+                    conn.close()
+                    return jsonify({"success": False, "error": f"Insufficient stock for '{p_row['name']}'. Only {p_row['quantity']} units available."}), 400
+
+        # 2. Auto-generate Customer ID if missing, and upsert customer
+        if not cust_id:
+            m_row = conn.execute("SELECT MAX(id) m FROM customers").fetchone()
+            cust_id = f"CUST-{1000 + (m_row['m'] or 0) + 1}"
+
+        existing_c = conn.execute("SELECT id FROM customers WHERE customer_id = ?", (cust_id,)).fetchone()
+        if existing_c:
+            conn.execute("UPDATE customers SET name=?, phone=? WHERE customer_id=?", (cust_name, cust_phone, cust_id))
+        else:
+            conn.execute("INSERT INTO customers(customer_id, name, phone, created_at) VALUES(?,?,?,?)",
+                         (cust_id, cust_name, cust_phone, now_str))
+
+        # 3. Auto-generate sequential Invoice Number
+        last_bill = conn.execute("SELECT id FROM bills ORDER BY id DESC LIMIT 1").fetchone()
+        seq = (last_bill["id"] if last_bill else 0) + 1
+        invoice_no = f"INV-{date_code}-{seq:04d}"
+
+        # 4. Compute Totals
+        subtotal = float(data.get("subtotal") or 0)
+        discount = float(data.get("discount") or 0)
+        grand_total = max(0.0, float(data.get("grand_total") or (subtotal - discount)))
+        paid_amount = float(data.get("paid_amount") or grand_total)
+        balance_due = max(0.0, grand_total - paid_amount)
+
+        payment_method = data.get("payment_method") or "Cash"
+        if balance_due <= 0.01:
+            payment_status = "Paid"
+        elif paid_amount > 0:
+            payment_status = "Partially Paid"
+        else:
+            payment_status = "Unpaid"
+
+        notes = (data.get("notes") or "").strip()
+        created_by = session.get("username", "admin")
+
+        # 5. Insert Bill
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO bills(invoice_no, customer_id, customer_name, customer_phone,
+                              subtotal, discount, grand_total, paid_amount, balance_due,
+                              payment_method, payment_status, status, notes, created_by, created_at)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        """, (invoice_no, cust_id, cust_name, cust_phone,
+              subtotal, discount, grand_total, paid_amount, balance_due,
+              payment_method, payment_status, "Completed", notes, created_by, now_str))
+        bill_id = cur.lastrowid
+
+        # 6. Insert Line Items and deduct stock
+        for it in items:
+            part_id = it.get("part_id")
+            item_name = it.get("item_name")
+            qty = int(it.get("quantity") or 1)
+            unit_price = float(it.get("unit_price") or 0)
+            item_disc = float(it.get("discount") or 0)
+            total_price = (qty * unit_price) - item_disc
+            cost_price = 0.0
+
+            if part_id:
+                p_row = conn.execute("SELECT purchase_price, quantity, name FROM parts WHERE id=?", (part_id,)).fetchone()
+                if p_row:
+                    cost_price = float(p_row["purchase_price"] or 0)
+                    new_qty = p_row["quantity"] - qty
+                    conn.execute("UPDATE parts SET quantity=?, updated_at=? WHERE id=?", (new_qty, now_str, part_id))
+                    conn.execute("""
+                        INSERT INTO stock_history(part_id, action, quantity, note, sale_price, purchase_price, created_at)
+                        VALUES(?,?,?,?,?,?,?)
+                    """, (part_id, "OUT", qty, f"Invoice #{invoice_no} ({cust_name})", unit_price, cost_price, now_str))
+
+            conn.execute("""
+                INSERT INTO bill_items(bill_id, part_id, item_name, quantity, unit_price, discount, total_price, cost_price)
+                VALUES(?,?,?,?,?,?,?,?)
+            """, (bill_id, part_id, item_name, qty, unit_price, item_disc, total_price, cost_price))
+
+        conn.commit()
+        conn.close()
+        log_audit("CREATE_INVOICE", "bill", bill_id, f"Invoice #{invoice_no} for {cust_name} (₹{grand_total})")
+        return jsonify({"success": True, "bill_id": bill_id, "invoice_no": invoice_no})
+    except Exception as ex:
+        conn.rollback()
+        conn.close()
+        return jsonify({"success": False, "error": f"Failed to generate bill: {str(ex)}"}), 500
+
+@app.route("/api/bills/cancel", methods=["POST"])
+def api_cancel_bill():
+    if "user_id" not in session or session.get("role") != "admin":
+        return jsonify({"error": "Admin access required to cancel bills"}), 403
+    data = request.get_json() or {}
+    bill_id = data.get("bill_id")
+    reason = (data.get("reason") or "Customer Cancelled / Return").strip()
+
+    conn = get_db()
+    bill = conn.execute("SELECT * FROM bills WHERE id = ?", (bill_id,)).fetchone()
+    if not bill:
+        conn.close()
+        return jsonify({"success": False, "error": "Bill not found"}), 404
+    if bill["status"] == "Cancelled":
+        conn.close()
+        return jsonify({"success": False, "error": "Bill is already cancelled"}), 400
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        conn.execute("UPDATE bills SET status='Cancelled', notes=notes || ? WHERE id=?",
+                     (f" [CANCELLED on {now_str}: {reason}]", bill_id))
+
+        items = conn.execute("SELECT part_id, quantity, item_name FROM bill_items WHERE bill_id=?", (bill_id,)).fetchall()
+        for it in items:
+            if it["part_id"]:
+                conn.execute("UPDATE parts SET quantity = quantity + ?, updated_at=? WHERE id=?",
+                             (it["quantity"], now_str, it["part_id"]))
+                conn.execute("""
+                    INSERT INTO stock_history(part_id, action, quantity, note, created_at)
+                    VALUES(?,?,?,?,?)
+                """, (it["part_id"], "IN", it["quantity"], f"Refund/Return Invoice #{bill['invoice_no']} ({reason})", now_str))
+
+        conn.commit()
+        conn.close()
+        log_audit("CANCEL_INVOICE", "bill", bill_id, f"Cancelled invoice #{bill['invoice_no']} - Items restored to stock")
+        return jsonify({"success": True})
+    except Exception as ex:
+        conn.rollback()
+        conn.close()
+        return jsonify({"success": False, "error": str(ex)}), 500
 
 @app.route("/manifest.json")
 def manifest():

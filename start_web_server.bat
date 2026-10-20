@@ -3,7 +3,7 @@ cd /d "%~dp0"
 title Patiraj Mobile Repair Shop - Web & Mobile Server
 
 echo =================================================================
-echo   PATIRAJ MOBILE REPAIR SHOP - WEB & MOBILE SERVER
+echo   PATIRAJ MOBILE REPAIR SHOP - WEB ^& MOBILE SERVER
 echo =================================================================
 echo.
 
@@ -62,7 +62,7 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [*] Starting Web & Mobile Server...
+echo [*] Starting Web ^& Mobile Server...
 echo =================================================================
 echo   NOTE: Is command prompt window ko band MAT karein!
 echo   Jab tak ye window open rahegi, tab tak mobile/web link chalega.
