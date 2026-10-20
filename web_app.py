@@ -2334,21 +2334,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     function switchBillingSubTab(sub) {
-      const posSec = document.getElementById('pos-section');
-      const histSec = document.getElementById('history-section');
-      const btnPos = document.getElementById('btn-subtab-pos');
-      const btnHist = document.getElementById('btn-subtab-history');
+      const posSec = document.getElementById('billing-pos-view') || document.getElementById('pos-section');
+      const histSec = document.getElementById('billing-history-view') || document.getElementById('history-section');
+      const pillPos = document.getElementById('subtab-bill-pos') || document.getElementById('btn-subtab-pos');
+      const pillHist = document.getElementById('subtab-bill-history') || document.getElementById('btn-subtab-history');
 
       if (sub === 'pos') {
         if (posSec) posSec.style.display = 'block';
         if (histSec) histSec.style.display = 'none';
-        if (btnPos) btnPos.className = 'btn-primary';
-        if (btnHist) btnHist.className = 'btn-secondary';
+        if (pillPos) pillPos.classList.add('active');
+        if (pillHist) pillHist.classList.remove('active');
       } else {
         if (posSec) posSec.style.display = 'none';
         if (histSec) histSec.style.display = 'block';
-        if (btnPos) btnPos.className = 'btn-secondary';
-        if (btnHist) btnHist.className = 'btn-primary';
+        if (pillPos) pillPos.classList.remove('active');
+        if (pillHist) pillHist.classList.add('active');
         loadBillsHistory();
       }
     }
@@ -2366,7 +2366,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     // 5. BILLING SYSTEM & POS CART LOGIC
     // =========================================================================
     async function initBillingTab() {
-      if (!document.getElementById('pos-cust-id').value) {
+      if (!document.getElementById('pos-cust-id') || !document.getElementById('pos-cust-id').value) {
         generateNewCustomerId();
       }
       await populatePosPartsDropdown();
@@ -2378,17 +2378,57 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const res = await fetch('/api/customers/next_id');
         const data = await res.json();
         if (data && data.next_id) {
-          document.getElementById('pos-cust-id').value = data.next_id;
+          const el = document.getElementById('pos-cust-id');
+          if (el) el.value = data.next_id;
         }
       } catch (err) {
         console.error('Error fetching next customer ID:', err);
       }
     }
 
+    let custSearchTimer = null;
+    async function onCustomerInput(val) {
+      clearTimeout(custSearchTimer);
+      const listDiv = document.getElementById('cust-autocomplete-list');
+      val = (val || '').trim();
+      if (val.length < 2) {
+        if (listDiv) listDiv.style.display = 'none';
+        return;
+      }
+      custSearchTimer = setTimeout(async () => {
+        try {
+          const res = await fetch('/api/customers?q=' + encodeURIComponent(val));
+          const custs = await res.json();
+          if (custs && custs.length > 0 && listDiv) {
+            listDiv.innerHTML = custs.map(c => `
+              <div style="padding:8px 12px; cursor:pointer; border-bottom:1px solid var(--border);"
+                   onclick="selectCustomerFromList('${c.customer_id}', '${(c.name||'').replace(/'/g, "\\'")}', '${c.phone||''}')">
+                <strong>${c.name}</strong> <span style="font-size:0.8rem; color:var(--muted);">[${c.customer_id}] ${c.phone||''}</span>
+              </div>
+            `).join('');
+            listDiv.style.display = 'block';
+          } else if (listDiv) {
+            listDiv.style.display = 'none';
+          }
+        } catch (e) {
+          if (listDiv) listDiv.style.display = 'none';
+        }
+      }, 250);
+    }
+
+    function selectCustomerFromList(custId, name, phone) {
+      if (document.getElementById('pos-cust-id')) document.getElementById('pos-cust-id').value = custId;
+      if (document.getElementById('pos-cust-name')) document.getElementById('pos-cust-name').value = name;
+      if (document.getElementById('pos-cust-phone')) document.getElementById('pos-cust-phone').value = phone;
+      const listDiv = document.getElementById('cust-autocomplete-list');
+      if (listDiv) listDiv.style.display = 'none';
+    }
+
+    let customerLookupTimeout = null;
     async function onCustomerPhoneOrNameInput() {
       clearTimeout(customerLookupTimeout);
       customerLookupTimeout = setTimeout(async () => {
-        const phone = (document.getElementById('pos-cust-phone').value || '').trim();
+        const phone = (document.getElementById('pos-cust-phone') ? document.getElementById('pos-cust-phone').value : '').trim();
         if (phone.length >= 4) {
           try {
             const res = await fetch('/api/customers?q=' + encodeURIComponent(phone));
@@ -2396,9 +2436,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             if (custs && custs.length > 0) {
               const match = custs.find(c => c.phone === phone) || custs[0];
               if (match) {
-                document.getElementById('pos-cust-id').value = match.customer_id;
-                if (!document.getElementById('pos-cust-name').value) {
-                  document.getElementById('pos-cust-name').value = match.name;
+                if (document.getElementById('pos-cust-id')) document.getElementById('pos-cust-id').value = match.customer_id;
+                const nameEl = document.getElementById('pos-cust-name');
+                if (nameEl && !nameEl.value) {
+                  nameEl.value = match.name;
                 }
               }
             }
@@ -2414,7 +2455,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (!select) return;
       if (!allPartsCache || allPartsCache.length === 0) {
         try {
-          const res = await fetch('/api/parts_list');
+          const res = await fetch('/api/parts');
           allPartsCache = await res.json();
         } catch (e) {
           console.error('Failed to load parts for POS', e);
@@ -2422,31 +2463,54 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       }
 
       const inStockParts = (allPartsCache || []).filter(p => p.quantity > 0);
-      select.innerHTML = '<option value="">-- Choose Spare Part or Item --</option>' +
+      select.innerHTML = '<option value="">-- Choose a spare part --</option>' +
         inStockParts.map(p => `
           <option value="${p.id}" data-name="${p.name}" data-price="${p.selling_price}" data-cost="${p.purchase_price}" data-stock="${p.quantity}">
-            ${p.name} (${p.model_compatible || 'Universal'}) - Stock: ${p.quantity} - ₹${Number(p.selling_price).toFixed(2)}
+            ${p.name} (${p.brand||''} ${p.model||p.compatible_models||'Universal'}) - Stock: ${p.quantity} - ₹${Number(p.selling_price).toFixed(2)}
           </option>
         `).join('');
+    }
+
+    function onPosPartSelectChange() {
+      const select = document.getElementById('pos-part-select');
+      const rateInput = document.getElementById('pos-part-rate');
+      const qtyInput = document.getElementById('pos-part-qty');
+      const hint = document.getElementById('pos-part-hint');
+      if (!select || !select.value) {
+        if (rateInput) rateInput.value = '';
+        if (hint) hint.innerHTML = '';
+        return;
+      }
+      const opt = select.selectedOptions[0];
+      const price = parseFloat(opt.getAttribute('data-price')) || 0;
+      const stock = parseInt(opt.getAttribute('data-stock')) || 0;
+      if (rateInput) rateInput.value = price.toFixed(2);
+      if (qtyInput) qtyInput.value = '1';
+      if (hint) {
+        hint.innerHTML = `Available Stock: <strong style="color:${stock <= 2 ? 'var(--danger)' : 'var(--success)'};">${stock} pcs</strong> | Default Price: <strong>₹${price.toFixed(2)}</strong>`;
+      }
     }
 
     function addSinglePartToPosCart() {
       const select = document.getElementById('pos-part-select');
       const qtyInput = document.getElementById('pos-part-qty');
+      const rateInput = document.getElementById('pos-part-rate');
       if (!select || !select.value) {
-        showToast('Please select a part to add', true);
+        showToast('Please select a spare part to add', true);
         return;
       }
       const partId = parseInt(select.value);
-      const qty = parseInt(qtyInput.value) || 1;
+      const qty = parseInt(qtyInput ? qtyInput.value : 1) || 1;
       const opt = select.selectedOptions[0];
       const name = opt.getAttribute('data-name');
-      const price = parseFloat(opt.getAttribute('data-price')) || 0;
+      const defaultPrice = parseFloat(opt.getAttribute('data-price')) || 0;
+      const customRate = rateInput && rateInput.value !== '' ? parseFloat(rateInput.value) : defaultPrice;
+      const price = isNaN(customRate) ? defaultPrice : customRate;
       const cost = parseFloat(opt.getAttribute('data-cost')) || 0;
       const stock = parseInt(opt.getAttribute('data-stock')) || 0;
 
       if (qty > stock) {
-        showToast(`Cannot add ${qty}. Only ${stock} available in stock!`, true);
+        showToast(`Cannot add ${qty} pcs. Only ${stock} available in stock!`, true);
         return;
       }
 
@@ -2454,11 +2518,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (existingIndex >= 0) {
         const newQty = posCart[existingIndex].quantity + qty;
         if (newQty > stock) {
-          showToast(`Total quantity (${newQty}) exceeds stock (${stock})!`, true);
+          showToast(`Total quantity (${newQty}) exceeds available stock (${stock})!`, true);
           return;
         }
         posCart[existingIndex].quantity = newQty;
-        posCart[existingIndex].total = posCart[existingIndex].quantity * posCart[existingIndex].unit_price;
+        posCart[existingIndex].unit_price = price;
+        posCart[existingIndex].total = newQty * price;
       } else {
         posCart.push({
           part_id: partId,
@@ -2473,34 +2538,33 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       }
 
       select.value = '';
-      qtyInput.value = '1';
+      if (qtyInput) qtyInput.value = '1';
+      if (rateInput) rateInput.value = '';
+      const hint = document.getElementById('pos-part-hint');
+      if (hint) hint.innerHTML = '';
       showToast(`✔ Added "${name}" to bill!`);
       renderPosCart();
     }
 
     function renderPosCart() {
       const tbody = document.getElementById('pos-cart-tbody');
-      const emptyRow = document.getElementById('pos-cart-empty');
       if (!tbody) return;
 
       if (posCart.length === 0) {
-        if (emptyRow) emptyRow.style.display = 'table-row';
-        tbody.innerHTML = '';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:24px; color:var(--muted);">No items added to invoice yet. Select items above.</td></tr>';
         calculateBillTotals();
         return;
       }
 
-      if (emptyRow) emptyRow.style.display = 'none';
-
       tbody.innerHTML = posCart.map((it, idx) => `
         <tr>
+          <td style="text-align:center;">${idx + 1}</td>
           <td>
             <strong>${it.item_name}</strong>
-            ${it.part_id ? `<div style="font-size:0.75rem; color:var(--muted);">Stock: ${it.max_stock} available</div>` : '<div style="font-size:0.75rem; color:var(--accent);">Custom Service/Item</div>'}
+            ${it.part_id ? '' : '<span class="badge" style="font-size:0.7rem; margin-left:4px;">Service</span>'}
           </td>
           <td>
-            <input type="number" min="0" step="0.5" class="form-control" style="width:90px; padding:4px 6px; font-size:0.85rem;"
-                   value="${it.unit_price}" onchange="updatePosCartPrice(${idx}, this.value)">
+            ${it.part_id ? `<span class="badge ${it.max_stock <= 2 ? 'badge-waiting' : 'badge-ready'}">${it.max_stock} pcs</span>` : '<span style="color:var(--muted); font-size:0.8rem;">Service</span>'}
           </td>
           <td>
             <div class="qty-btn-group">
@@ -2509,6 +2573,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
                      value="${it.quantity}" onchange="updatePosCartQty(${idx}, parseInt(this.value)||1)">
               <button type="button" class="qty-btn" onclick="updatePosCartQty(${idx}, ${it.quantity + 1})">+</button>
             </div>
+          </td>
+          <td>
+            <input type="number" min="0" step="0.5" class="form-control" style="width:90px; padding:4px 6px; font-size:0.85rem;"
+                   value="${it.unit_price}" onchange="updatePosCartPrice(${idx}, this.value)">
           </td>
           <td>
             <strong style="color:var(--accent);">₹${Number(it.total).toFixed(2)}</strong>
@@ -2556,8 +2624,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       const discount = Math.max(0, parseFloat(discountInput ? discountInput.value : 0) || 0);
       const grandTotal = Math.max(0, subtotal - discount);
 
-      const subDisplay = document.getElementById('pos-subtotal-display');
-      const grandDisplay = document.getElementById('pos-grand-total-display');
+      const subDisplay = document.getElementById('pos-subtotal') || document.getElementById('pos-subtotal-display');
+      const grandDisplay = document.getElementById('pos-grand-total') || document.getElementById('pos-grand-total-display');
       if (subDisplay) subDisplay.textContent = '₹' + subtotal.toFixed(2);
       if (grandDisplay) grandDisplay.textContent = '₹' + grandTotal.toFixed(2);
 
@@ -2566,16 +2634,26 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (isNaN(paidAmount) || paidAmount < 0) paidAmount = 0;
 
       const balanceDue = Math.max(0, grandTotal - paidAmount);
-      const balDisplay = document.getElementById('pos-balance-display');
-      const balRow = document.getElementById('pos-balance-row');
+      const balDisplay = document.getElementById('pos-balance-due') || document.getElementById('pos-balance-display');
       if (balDisplay) {
         balDisplay.textContent = '₹' + balanceDue.toFixed(2);
-        if (balanceDue <= 0.01) {
-          balDisplay.style.color = 'var(--success)';
-          if (balRow) balRow.style.color = 'var(--success)';
+        balDisplay.style.color = balanceDue <= 0.01 ? 'var(--success)' : 'var(--danger)';
+      }
+
+      const badge = document.getElementById('pos-status-badge');
+      if (badge) {
+        if (grandTotal === 0) {
+          badge.textContent = 'NO DUES';
+          badge.className = 'badge badge-ready';
+        } else if (balanceDue <= 0.01) {
+          badge.textContent = 'PAID';
+          badge.className = 'badge badge-ready';
+        } else if (paidAmount > 0) {
+          badge.textContent = 'PARTIALLY PAID';
+          badge.className = 'badge badge-progress';
         } else {
-          balDisplay.style.color = 'var(--danger)';
-          if (balRow) balRow.style.color = 'var(--danger)';
+          badge.textContent = 'UNPAID';
+          badge.className = 'badge badge-waiting';
         }
       }
     }
@@ -2588,7 +2666,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     async function openMultiItemPickerModal() {
       if (!allPartsCache || allPartsCache.length === 0) {
         try {
-          const res = await fetch('/api/parts_list');
+          const res = await fetch('/api/parts');
           allPartsCache = await res.json();
         } catch (e) {
           console.error(e);
@@ -2603,7 +2681,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       const q = (document.getElementById('multi-picker-search').value || '').toLowerCase().trim();
       const filtered = multiPickerPartsList.filter(p =>
         p.name.toLowerCase().includes(q) ||
-        (p.model_compatible && p.model_compatible.toLowerCase().includes(q))
+        (p.brand && p.brand.toLowerCase().includes(q)) ||
+        (p.model && p.model.toLowerCase().includes(q)) ||
+        (p.compatible_models && p.compatible_models.toLowerCase().includes(q))
       );
       renderMultiPickerTable(filtered);
     }
@@ -2612,7 +2692,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       const tbody = document.getElementById('multi-picker-tbody');
       if (!tbody) return;
       if (parts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding:18px; color:var(--muted);">No matching in-stock parts found.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding:18px; color:var(--muted);">No matching in-stock parts found.</td></tr>';
+        updateMultiPickerCount();
         return;
       }
       tbody.innerHTML = parts.map(p => {
@@ -2620,21 +2701,30 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         return `
           <tr>
             <td style="text-align:center;">
-              <input type="checkbox" class="picker-item-checkbox" data-id="${p.id}" ${inCart ? 'checked' : ''} style="width:18px; height:18px; cursor:pointer;">
+              <input type="checkbox" class="picker-item-checkbox" data-id="${p.id}" ${inCart ? 'checked' : ''} onchange="updateMultiPickerCount()" style="width:18px; height:18px; cursor:pointer;">
             </td>
             <td><strong>${p.name}</strong></td>
-            <td>${p.model_compatible || 'Universal'}</td>
-            <td><span class="badge ${p.quantity <= (p.min_stock_alert||2)?'badge-low':'badge-ready'}">${p.quantity}</span></td>
+            <td>${p.brand||''} ${p.model||p.compatible_models||'Universal'}</td>
+            <td><span class="badge ${p.quantity <= (p.low_stock||2)?'badge-waiting':'badge-ready'}">${p.quantity} pcs</span></td>
             <td><strong style="color:var(--accent);">₹${Number(p.selling_price).toFixed(2)}</strong></td>
+            <td style="text-align:center;"><input type="number" min="1" max="${p.quantity}" value="1" id="multi-qty-${p.id}" class="qty-input" style="width:50px;"></td>
           </tr>
         `;
       }).join('');
+      updateMultiPickerCount();
     }
 
-    function toggleSelectAllMultiPicker() {
+    function updateMultiPickerCount() {
+      const count = document.querySelectorAll('.picker-item-checkbox:checked').length;
+      const countEl = document.getElementById('multi-picker-count');
+      if (countEl) countEl.textContent = `${count} item(s) selected`;
+    }
+
+    function toggleSelectAllMultiPicker(forceChecked) {
       const checkboxes = document.querySelectorAll('.picker-item-checkbox');
-      const allChecked = Array.from(checkboxes).every(cb => cb.checked);
-      checkboxes.forEach(cb => cb.checked = !allChecked);
+      const target = typeof forceChecked === 'boolean' ? forceChecked : !Array.from(checkboxes).every(cb => cb.checked);
+      checkboxes.forEach(cb => cb.checked = target);
+      updateMultiPickerCount();
     }
 
     function addSelectedItemsFromPicker() {
@@ -2648,17 +2738,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const partId = parseInt(cb.getAttribute('data-id'));
         const part = allPartsCache.find(p => p.id === partId);
         if (part) {
+          const qtyInput = document.getElementById(`multi-qty-${partId}`);
+          const qty = Math.min(part.quantity, Math.max(1, parseInt(qtyInput ? qtyInput.value : 1) || 1));
           const existing = posCart.find(it => it.part_id === partId);
-          if (!existing) {
+          if (existing) {
+            existing.quantity = Math.min(part.quantity, existing.quantity + qty);
+            existing.total = existing.quantity * existing.unit_price;
+          } else {
             posCart.push({
               part_id: part.id,
               item_name: part.name,
               unit_price: parseFloat(part.selling_price) || 0,
               cost_price: parseFloat(part.purchase_price) || 0,
-              quantity: 1,
+              quantity: qty,
               max_stock: part.quantity,
               discount: 0,
-              total: parseFloat(part.selling_price) || 0
+              total: qty * (parseFloat(part.selling_price) || 0)
             });
             addedCount++;
           }
@@ -2671,18 +2766,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     function openCustomItemModal() {
-      document.getElementById('custom-item-name').value = '';
-      document.getElementById('custom-item-price').value = '';
-      document.getElementById('custom-item-cost').value = '';
-      document.getElementById('custom-item-qty').value = '1';
+      const nameEl = document.getElementById('custom-item-name');
+      const priceEl = document.getElementById('custom-item-price');
+      const qtyEl = document.getElementById('custom-item-qty');
+      if (nameEl) nameEl.value = '';
+      if (priceEl) priceEl.value = '';
+      if (qtyEl) qtyEl.value = '1';
       document.getElementById('customItemModal').style.display = 'flex';
     }
 
     function submitCustomItem(e) {
-      e.preventDefault();
-      const name = document.getElementById('custom-item-name').value.trim();
+      if (e && e.preventDefault) e.preventDefault();
+      const name = (document.getElementById('custom-item-name').value || '').trim();
       const price = parseFloat(document.getElementById('custom-item-price').value) || 0;
-      const cost = parseFloat(document.getElementById('custom-item-cost').value) || 0;
       const qty = parseInt(document.getElementById('custom-item-qty').value) || 1;
 
       if (!name) {
@@ -2694,7 +2790,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         part_id: null,
         item_name: name,
         unit_price: price,
-        cost_price: cost,
+        cost_price: 0,
         quantity: qty,
         max_stock: null,
         discount: 0,
@@ -2715,19 +2811,21 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         return;
       }
 
-      const custName = (document.getElementById('pos-cust-name').value || 'Walk-in Customer').trim();
-      const custPhone = (document.getElementById('pos-cust-phone').value || '').trim();
-      const custId = (document.getElementById('pos-cust-id').value || '').trim();
-      const payMethod = document.getElementById('pos-payment-method').value;
-      const notes = document.getElementById('pos-notes').value.trim();
+      const custName = (document.getElementById('pos-cust-name') ? document.getElementById('pos-cust-name').value : 'Walk-in Customer').trim() || 'Walk-in Customer';
+      const custPhone = (document.getElementById('pos-cust-phone') ? document.getElementById('pos-cust-phone').value : '').trim();
+      const custId = (document.getElementById('pos-cust-id') ? document.getElementById('pos-cust-id').value : '').trim();
+      const payMethodEl = document.getElementById('pos-pay-method') || document.getElementById('pos-payment-method');
+      const payMethod = payMethodEl ? payMethodEl.value : 'Cash';
+      const notes = (document.getElementById('pos-notes') ? document.getElementById('pos-notes').value : '').trim();
 
       const subtotal = posCart.reduce((sum, it) => sum + (it.total || 0), 0);
-      const discount = Math.max(0, parseFloat(document.getElementById('pos-discount').value) || 0);
+      const discountInput = document.getElementById('pos-discount');
+      const discount = Math.max(0, parseFloat(discountInput ? discountInput.value : 0) || 0);
       const grandTotal = Math.max(0, subtotal - discount);
-      let paidAmount = parseFloat(document.getElementById('pos-paid-amount').value);
-      if (isNaN(paidAmount)) paidAmount = grandTotal;
+      let paidAmount = parseFloat(document.getElementById('pos-paid-amount') ? document.getElementById('pos-paid-amount').value : 0);
+      if (isNaN(paidAmount) || paidAmount < 0) paidAmount = grandTotal;
 
-      if (!confirm(`Generate Bill for ${custName}?\nTotal: ₹${grandTotal.toFixed(2)}\nPaid: ₹${paidAmount.toFixed(2)}`)) {
+      if (!confirm(`Generate Bill for ${custName}?\nGrand Total: ₹${grandTotal.toFixed(2)}\nAmount Paid: ₹${paidAmount.toFixed(2)}`)) {
         return;
       }
 
@@ -2757,15 +2855,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           showToast(`✔ Invoice #${result.invoice_no} generated successfully!`);
           posCart = [];
           renderPosCart();
-          document.getElementById('pos-cust-name').value = '';
-          document.getElementById('pos-cust-phone').value = '';
-          document.getElementById('pos-discount').value = '0';
-          document.getElementById('pos-paid-amount').value = '0';
-          document.getElementById('pos-notes').value = '';
+          if (document.getElementById('pos-cust-name')) document.getElementById('pos-cust-name').value = '';
+          if (document.getElementById('pos-cust-phone')) document.getElementById('pos-cust-phone').value = '';
+          if (document.getElementById('pos-discount')) document.getElementById('pos-discount').value = '0';
+          if (document.getElementById('pos-paid-amount')) document.getElementById('pos-paid-amount').value = '';
+          if (document.getElementById('pos-notes')) document.getElementById('pos-notes').value = '';
           generateNewCustomerId();
 
           try {
-            const partsRes = await fetch('/api/parts_list');
+            const partsRes = await fetch('/api/parts');
             allPartsCache = await partsRes.json();
             populatePosPartsDropdown();
           } catch (e) {}
@@ -2783,11 +2881,11 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     // 8. BILL HISTORY, INVOICE PREVIEW, PRINT & SHARE
     // =========================================================================
     async function loadBillsHistory() {
-      const tbody = document.getElementById('bills-history-tbody');
+      const tbody = document.getElementById('bill-history-tbody') || document.getElementById('bills-history-tbody');
       if (!tbody) return;
-      const q = (document.getElementById('history-search-input') ? document.getElementById('history-search-input').value : '').trim();
-      const period = document.getElementById('history-period-select') ? document.getElementById('history-period-select').value : 'all';
-      const status = document.getElementById('history-status-select') ? document.getElementById('history-status-select').value : 'all';
+      const q = (document.getElementById('bill-history-search') || document.getElementById('history-search-input') || {value: ''}).value.trim();
+      const period = (document.getElementById('bill-history-period') || document.getElementById('history-period-select') || {value: 'all'}).value;
+      const status = (document.getElementById('bill-history-status') || document.getElementById('history-status-select') || {value: 'all'}).value;
 
       try {
         const url = `/api/bills?q=${encodeURIComponent(q)}&period=${encodeURIComponent(period)}&status=${encodeURIComponent(status)}`;
@@ -2795,9 +2893,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const bills = await res.json();
 
         if (!bills || bills.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--muted); padding:24px;">No invoices found matching criteria.</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:var(--muted); padding:24px;">No invoices found matching criteria.</td></tr>';
+          updateBillHistoryMetrics([]);
           return;
         }
+
+        updateBillHistoryMetrics(bills);
 
         tbody.innerHTML = bills.map(b => {
           let badgeClass = 'badge-paid';
@@ -2809,30 +2910,44 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             <tr>
               <td><strong style="color:var(--accent);">${b.invoice_no}</strong></td>
               <td style="font-size:0.8rem; color:var(--muted);">${b.created_at}</td>
-              <td>
-                <strong>${b.customer_name}</strong>
-                <div style="font-size:0.75rem; color:var(--muted);">${b.customer_id ? `[${b.customer_id}] ` : ''}${b.customer_phone || ''}</div>
-              </td>
-              <td><span class="badge" style="background:var(--card-bg); border:1px solid var(--border-color);">${b.item_count || 1} items</span></td>
-              <td><strong style="color:var(--text-color);">₹${Number(b.grand_total).toFixed(2)}</strong></td>
-              <td style="font-size:0.82rem;">
-                <div style="color:var(--success);">Paid: ₹${Number(b.paid_amount).toFixed(2)}</div>
-                ${b.balance_due > 0 ? `<div style="color:var(--danger); font-weight:700;">Due: ₹${Number(b.balance_due).toFixed(2)}</div>` : ''}
-              </td>
+              <td><strong>${b.customer_name}</strong></td>
+              <td style="font-size:0.82rem;">${b.customer_phone || '-'}</td>
+              <td><span class="badge" style="background:var(--card-alt); border:1px solid var(--border);">${b.item_count || 1} items</span></td>
+              <td><strong style="color:var(--text);">₹${Number(b.grand_total).toFixed(2)}</strong></td>
+              <td style="color:var(--success);">₹${Number(b.paid_amount).toFixed(2)}</td>
+              <td style="${b.balance_due > 0 ? 'color:var(--danger); font-weight:700;' : 'color:var(--muted);'}">₹${Number(b.balance_due).toFixed(2)}</td>
               <td><span class="badge ${badgeClass}">${b.status === 'Cancelled' ? 'CANCELLED' : b.payment_status.toUpperCase()}</span></td>
+              <td style="font-size:0.82rem;">${b.payment_method || 'Cash'}</td>
               <td>
                 <div style="display:flex; gap:4px; flex-wrap:wrap;">
-                  <button class="btn-primary" style="padding:4px 8px; font-size:0.78rem;" onclick="viewInvoice(${b.id})">👁️ View</button>
-                  <button class="btn-secondary" style="padding:4px 8px; font-size:0.78rem;" onclick="shareInvoiceWhatsAppDirect(${b.id}, '${b.invoice_no}', '${b.customer_name}', '${b.customer_phone||''}', ${b.grand_total}, ${b.balance_due})">💬 WA</button>
-                  ${b.status !== 'Cancelled' ? `<button class="btn-danger" style="padding:4px 8px; font-size:0.78rem;" onclick="openCancelBillModal(${b.id})">❌</button>` : ''}
+                  <button class="btn-primary" style="padding:3px 7px; font-size:0.75rem;" onclick="viewInvoice(${b.id})">👁️ View</button>
+                  <button class="btn-secondary" style="padding:3px 7px; font-size:0.75rem;" onclick="shareInvoiceWhatsAppDirect(${b.id}, '${b.invoice_no}', '${(b.customer_name||'').replace(/'/g, "\\'")}', '${b.customer_phone||''}', ${b.grand_total}, ${b.balance_due})">💬 WA</button>
+                  ${b.status !== 'Cancelled' ? `<button class="btn-danger" style="padding:3px 7px; font-size:0.75rem;" onclick="openCancelBillModal(${b.id})">❌</button>` : ''}
                 </div>
               </td>
             </tr>
           `;
         }).join('');
       } catch (err) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--danger); padding:24px;">Failed to load invoices.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align:center; color:var(--danger); padding:24px;">Failed to load invoices: ' + err + '</td></tr>';
       }
+    }
+
+    function updateBillHistoryMetrics(bills) {
+      const activeBills = (bills || []).filter(b => b.status !== 'Cancelled');
+      const totalBilled = activeBills.reduce((s, b) => s + (b.grand_total || 0), 0);
+      const totalPaid = activeBills.reduce((s, b) => s + (b.paid_amount || 0), 0);
+      const totalDue = activeBills.reduce((s, b) => s + (b.balance_due || 0), 0);
+
+      const elBilled = document.getElementById('hist-total-billed');
+      const elPaid = document.getElementById('hist-total-collected');
+      const elDue = document.getElementById('hist-total-due');
+      const elCount = document.getElementById('hist-bills-count');
+
+      if (elBilled) elBilled.textContent = '₹' + totalBilled.toLocaleString('en-IN', {minimumFractionDigits: 2});
+      if (elPaid) elPaid.textContent = '₹' + totalPaid.toLocaleString('en-IN', {minimumFractionDigits: 2});
+      if (elDue) elDue.textContent = '₹' + totalDue.toLocaleString('en-IN', {minimumFractionDigits: 2});
+      if (elCount) elCount.textContent = activeBills.length;
     }
 
     async function viewInvoice(billId) {
@@ -2848,44 +2963,56 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const shop = data.shop || {};
         const items = data.items || [];
 
-        document.getElementById('inv-shop-name').textContent = shop.shop_name || 'Patiraj Mobile Repair Shop';
-        document.getElementById('inv-shop-address').textContent = shop.shop_address || 'Main Road, Mobile Market';
-        document.getElementById('inv-shop-phone').textContent = 'Phone: ' + (shop.shop_phone || '+91 9876543210');
-        document.getElementById('inv-shop-email').textContent = shop.shop_email ? 'Email: ' + shop.shop_email : '';
+        const setTxt = (ids, val) => {
+          ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = val;
+          });
+        };
 
-        document.getElementById('inv-number').textContent = b.invoice_no;
-        document.getElementById('inv-date').textContent = b.created_at;
-        const statusBadge = document.getElementById('inv-status-badge');
-        statusBadge.textContent = b.status === 'Cancelled' ? 'CANCELLED' : b.payment_status.toUpperCase();
-        statusBadge.className = 'badge ' + (b.status === 'Cancelled' ? 'badge-cancelled' : (b.payment_status === 'Paid' ? 'badge-paid' : 'badge-unpaid'));
+        setTxt(['inv-shop-name'], shop.shop_name || 'Patiraj Mobile Repair Shop');
+        setTxt(['inv-shop-address'], shop.shop_address || 'Station Road, Near Bus Stand, Main Market');
+        setTxt(['inv-shop-contact', 'inv-shop-phone'], '📞 Phone: ' + (shop.shop_phone || '+91 9876543210'));
 
-        document.getElementById('inv-cust-name').textContent = b.customer_name;
-        document.getElementById('inv-cust-phone').textContent = b.customer_phone || '-';
-        document.getElementById('inv-cust-id').textContent = b.customer_id || '-';
+        setTxt(['inv-number'], b.invoice_no);
+        setTxt(['inv-date'], b.created_at);
+        setTxt(['inv-cust-name'], b.customer_name);
+        setTxt(['inv-cust-phone'], b.customer_phone || '-');
+        setTxt(['inv-cust-id'], b.customer_id || '-');
+        setTxt(['inv-pay-method', 'inv-payment-method'], b.payment_method || 'Cash');
+
+        const statusEl = document.getElementById('inv-pay-status') || document.getElementById('inv-status-badge');
+        if (statusEl) {
+          statusEl.textContent = b.status === 'Cancelled' ? 'CANCELLED' : b.payment_status.toUpperCase();
+          statusEl.style.color = b.status === 'Cancelled' ? '#94a3b8' : (b.payment_status === 'Paid' ? '#059669' : '#dc2626');
+        }
 
         const itemsTbody = document.getElementById('inv-items-tbody');
-        itemsTbody.innerHTML = items.map((it, idx) => `
-          <tr>
-            <td style="text-align:center;">${idx + 1}</td>
-            <td><strong>${it.item_name}</strong></td>
-            <td style="text-align:center;">${it.quantity}</td>
-            <td style="text-align:right;">₹${Number(it.unit_price).toFixed(2)}</td>
-            <td style="text-align:right;"><strong>₹${Number(it.total_price).toFixed(2)}</strong></td>
-          </tr>
-        `).join('');
+        if (itemsTbody) {
+          itemsTbody.innerHTML = items.map((it, idx) => `
+            <tr>
+              <td style="text-align:center;">${idx + 1}</td>
+              <td><strong>${it.item_name}</strong></td>
+              <td style="text-align:center;">${it.quantity}</td>
+              <td style="text-align:right;">₹${Number(it.unit_price).toFixed(2)}</td>
+              <td style="text-align:right;"><strong>₹${Number(it.total_price).toFixed(2)}</strong></td>
+            </tr>
+          `).join('');
+        }
 
-        document.getElementById('inv-subtotal').textContent = '₹' + Number(b.subtotal).toFixed(2);
-        document.getElementById('inv-discount').textContent = '₹' + Number(b.discount).toFixed(2);
-        document.getElementById('inv-grand-total').textContent = '₹' + Number(b.grand_total).toFixed(2);
-        document.getElementById('inv-paid').textContent = '₹' + Number(b.paid_amount).toFixed(2);
-        document.getElementById('inv-balance').textContent = '₹' + Number(b.balance_due).toFixed(2);
-        document.getElementById('inv-payment-method').textContent = b.payment_method || 'Cash';
-        document.getElementById('inv-notes').textContent = b.notes || 'Thank you for your business!';
-        document.getElementById('inv-terms').textContent = shop.shop_terms || 'Warranty valid only with this original invoice.';
+        setTxt(['inv-subtotal'], '₹' + Number(b.subtotal).toFixed(2));
+        setTxt(['inv-discount'], (b.discount > 0 ? '-₹' : '₹') + Number(b.discount).toFixed(2));
+        setTxt(['inv-grand-total'], '₹' + Number(b.grand_total).toFixed(2));
+        setTxt(['inv-paid'], '₹' + Number(b.paid_amount).toFixed(2));
+        setTxt(['inv-due', 'inv-balance'], '₹' + Number(b.balance_due).toFixed(2));
 
-        document.getElementById('invoiceModal').style.display = 'flex';
+        setTxt(['inv-terms-text', 'inv-terms'], shop.shop_terms || shop.invoice_terms || 'Warranty valid for 30 days. No warranty on physical or liquid damage.');
+        setTxt(['inv-notes-text', 'inv-notes'], b.notes || 'Thank you for your business!');
+
+        const modal = document.getElementById('invoiceModal');
+        if (modal) modal.style.display = 'flex';
       } catch (e) {
-        showToast('Failed to load invoice details: ' + e, true);
+        showToast('Failed to load invoice: ' + e, true);
       }
     }
 
@@ -2941,13 +3068,15 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 
     function openCancelBillModal(billId) {
       currentCancelBillId = billId;
-      document.getElementById('cancel-bill-reason').value = 'Customer Return / Billing Adjustment';
+      const el = document.getElementById('cancel-bill-reason');
+      if (el) el.value = 'Customer Return / Billing Adjustment';
       document.getElementById('cancelBillConfirmModal').style.display = 'flex';
     }
 
     async function submitCancelBill() {
       if (!currentCancelBillId) return;
-      const reason = document.getElementById('cancel-bill-reason').value.trim();
+      const reasonEl = document.getElementById('cancel-bill-reason');
+      const reason = reasonEl ? reasonEl.value.trim() : 'Cancelled';
       closeModal('cancelBillConfirmModal');
       showToast('Cancelling invoice and restoring stock...');
 
@@ -2981,12 +3110,18 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const data = await res.json();
         const settings = (data && data.settings) ? data.settings : (data || {});
         if (settings) {
-          if (document.getElementById('set-shop-name')) document.getElementById('set-shop-name').value = settings.shop_name || '';
-          if (document.getElementById('set-shop-phone')) document.getElementById('set-shop-phone').value = settings.shop_phone || '';
-          if (document.getElementById('set-shop-email')) document.getElementById('set-shop-email').value = settings.shop_email || '';
-          if (document.getElementById('set-shop-address')) document.getElementById('set-shop-address').value = settings.shop_address || '';
-          if (document.getElementById('set-shop-upi')) document.getElementById('set-shop-upi').value = settings.shop_upi || '';
-          if (document.getElementById('set-shop-terms')) document.getElementById('set-shop-terms').value = settings.shop_terms || settings.invoice_terms || '';
+          const setVal = (ids, val) => {
+            ids.forEach(id => {
+              const el = document.getElementById(id);
+              if (el) el.value = val;
+            });
+          };
+          setVal(['cfg-shop-name', 'set-shop-name'], settings.shop_name || 'Patiraj Mobile Repair Shop');
+          setVal(['cfg-shop-phone', 'set-shop-phone'], settings.shop_phone || '+91 9876543210');
+          setVal(['cfg-shop-email', 'set-shop-email'], settings.shop_email || '');
+          setVal(['cfg-shop-address', 'set-shop-address'], settings.shop_address || 'Station Road, Near Bus Stand, Main Market');
+          setVal(['cfg-upi-id', 'set-shop-upi'], settings.shop_upi || settings.upi_id || '');
+          setVal(['cfg-invoice-terms', 'set-shop-terms'], settings.shop_terms || settings.invoice_terms || 'Warranty valid for 30 days on replaced hardware components.');
         }
       } catch (e) {
         console.error('Error loading shop settings:', e);
@@ -2994,14 +3129,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     async function submitSaveShopSettings(e) {
-      e.preventDefault();
+      if (e && e.preventDefault) e.preventDefault();
+      const getVal = (ids) => {
+        for (const id of ids) {
+          const el = document.getElementById(id);
+          if (el && el.value !== undefined) return el.value.trim();
+        }
+        return '';
+      };
+
       const payload = {
-        shop_name: document.getElementById('set-shop-name').value,
-        shop_phone: document.getElementById('set-shop-phone').value,
-        shop_email: document.getElementById('set-shop-email').value,
-        shop_address: document.getElementById('set-shop-address').value,
-        shop_upi: document.getElementById('set-shop-upi').value,
-        shop_terms: document.getElementById('set-shop-terms').value
+        shop_name: getVal(['cfg-shop-name', 'set-shop-name']),
+        shop_phone: getVal(['cfg-shop-phone', 'set-shop-phone']),
+        shop_email: getVal(['cfg-shop-email', 'set-shop-email']),
+        shop_address: getVal(['cfg-shop-address', 'set-shop-address']),
+        shop_upi: getVal(['cfg-upi-id', 'set-shop-upi']),
+        shop_terms: getVal(['cfg-invoice-terms', 'set-shop-terms'])
       };
 
       try {
@@ -3012,7 +3155,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         });
         const data = await res.json();
         if (data.success) {
-          showToast('✔ Shop settings & invoice profile saved!');
+          showToast('✔ Shop & Invoice settings saved successfully!');
         } else {
           showToast('Error: ' + (data.error || 'Failed to save settings'), true);
         }
@@ -3022,17 +3165,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }
 
     async function submitChangeMyPassword(e) {
-      e.preventDefault();
-      const curr = document.getElementById('my-curr-pass').value;
-      const newP = document.getElementById('my-new-pass').value;
-      const conf = document.getElementById('my-confirm-pass').value;
+      if (e && e.preventDefault) e.preventDefault();
+      const pwdInput = document.getElementById('settings-my-pwd') || document.getElementById('my-new-pass');
+      const newP = pwdInput ? pwdInput.value.trim() : '';
 
-      if (newP !== conf) {
-        showToast('New passwords do not match!', true);
-        return;
-      }
-      if (newP.length < 6) {
-        showToast('Password must be at least 6 characters!', true);
+      if (!newP || newP.length < 6) {
+        showToast('Password must be at least 6 characters long!', true);
         return;
       }
 
@@ -3040,14 +3178,12 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         const res = await fetch('/api/change_my_password', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({current_password: curr, new_password: newP})
+          body: JSON.stringify({new_password: newP})
         });
         const data = await res.json();
         if (data.success) {
           showToast('✔ Password updated successfully!');
-          document.getElementById('my-curr-pass').value = '';
-          document.getElementById('my-new-pass').value = '';
-          document.getElementById('my-confirm-pass').value = '';
+          if (pwdInput) pwdInput.value = '';
         } else {
           showToast('Error: ' + (data.error || 'Failed to update password'), true);
         }
@@ -3966,7 +4102,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     // =========================================================================
     // 10. APPLICATION INITIALIZATION
     // =========================================================================
-    document.addEventListener('DOMContentLoaded', () => {
+    function initApp() {
       // Restore Theme (Dark / Light)
       const savedTheme = localStorage.getItem('patiraj_theme') || 'dark';
       setTheme(savedTheme);
@@ -3988,7 +4124,13 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       // Initial stats & preloads
       loadDashboardStats();
       loadShopSettings();
-    });
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initApp);
+    } else {
+      initApp();
+    }
   </script>
 </body>
 </html>
@@ -4910,6 +5052,7 @@ def api_bill_detail(bill_id):
 
     settings_dict = {r["setting_key"]: r["setting_value"] for r in settings_rows}
     return jsonify({
+        "success": True,
         "bill": dict(bill),
         "items": [dict(it) for it in items],
         "shop": settings_dict

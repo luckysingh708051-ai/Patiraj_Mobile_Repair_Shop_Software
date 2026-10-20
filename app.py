@@ -2644,8 +2644,7 @@ if __name__ == "__main__":
             except Exception:
                 pass
 
-            t_start = time.time()
-            proc = subprocess.Popen([
+            subprocess.Popen([
                 browser_exe,
                 f"--app={url}",
                 f"--user-data-dir={user_data_dir}",
@@ -2654,36 +2653,19 @@ if __name__ == "__main__":
                 "--window-size=1280,820",
                 "--window-position=60,40"
             ])
-            try:
-                proc.wait()
-            except KeyboardInterrupt:
-                pass
-
-            # If Edge exited within 2.5 seconds (delegated to existing process),
-            # keep Python and the Flask server running so the app does not die!
-            if time.time() - t_start < 2.5:
-                print("\n=================================================================")
-                print("  PATIRAJ MOBILE REPAIR SHOP - APPLICATION IS ACTIVE")
-                print("  URL: http://127.0.0.1:5000")
-                print("  Keep this window open while using the software.")
-                print("  Press Ctrl+C to close.")
-                print("=================================================================\n")
-                try:
-                    while True:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    print("\n[*] Exiting Patiraj Mobile Repair Shop...")
         else:
             print(f"[*] Opening Patiraj Mobile Repair Shop in default browser: {url}")
             webbrowser.open(url)
-            print("\n=================================================================")
-            print("  PATIRAJ MOBILE REPAIR SHOP - APPLICATION IS ACTIVE")
-            print("  URL: http://127.0.0.1:5000")
-            print("  Keep this window open while using the software.")
-            print("  Press Ctrl+C to close.")
-            print("=================================================================\n")
-            try:
-                while True:
-                    time.sleep(1)
-            except KeyboardInterrupt:
-                print("\n[*] Exiting Patiraj Mobile Repair Shop...")
+
+        print("\n=================================================================")
+        print("  PATIRAJ MOBILE REPAIR SHOP - APPLICATION IS ACTIVE")
+        print("  Local URL:  http://127.0.0.1:5000")
+        print("  Status:     Server is running smoothly.")
+        print("  NOTE: Keep this window open while using the software.")
+        print("  Press Ctrl+C to close.")
+        print("=================================================================\n")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[*] Exiting Patiraj Mobile Repair Shop...")
