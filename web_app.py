@@ -12,6 +12,13 @@ app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "patiraj_repair_secret_key_2026_secured_salt_token")
 DB_FILE = "mobile_repair_manager.db"
 
+@app.after_request
+def add_no_cache_headers(response):
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate, max-age=0"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
+
 # -----------------------------------------------------------------------------
 # DATABASE INITIALIZATION & SCHEMA
 # -----------------------------------------------------------------------------
