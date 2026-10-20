@@ -3029,7 +3029,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       const shop = currentInvoiceData.shop || {};
       const items = currentInvoiceData.items || [];
 
-      let itemsText = items.map(it => `• ${it.item_name} (x${it.quantity}) - ₹${Number(it.total_price).toFixed(2)}`).join('\n');
+      let itemsText = items.map(it => `• ${it.item_name} (x${it.quantity}) - ₹${Number(it.total_price).toFixed(2)}`).join(String.fromCharCode(10));
       let msg = `🧾 *${shop.shop_name || 'Patiraj Mobile Repair Shop'}*\n` +
                 `📄 *Invoice #:* ${b.invoice_no}\n` +
                 `📅 *Date:* ${b.created_at}\n` +
