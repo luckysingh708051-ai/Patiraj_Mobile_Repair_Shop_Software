@@ -2638,10 +2638,52 @@ if __name__ == "__main__":
         url = "http://127.0.0.1:5000"
         if browser_exe:
             print(f"[*] Launching Patiraj Mobile Repair Shop in Native Desktop Window: {browser_exe}")
-            proc = subprocess.Popen([browser_exe, f"--app={url}", "--window-size=1280,820", "--window-position=60,40"])
+            user_data_dir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), "PatirajRepair", "AppProfile")
+            try:
+                os.makedirs(user_data_dir, exist_ok=True)
+            except Exception:
+                pass
+
+            t_start = time.time()
+            proc = subprocess.Popen([
+                browser_exe,
+                f"--app={url}",
+                f"--user-data-dir={user_data_dir}",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--window-size=1280,820",
+                "--window-position=60,40"
+            ])
             try:
                 proc.wait()
             except KeyboardInterrupt:
                 pass
+
+            # If Edge exited within 2.5 seconds (delegated to existing process),
+            # keep Python and the Flask server running so the app does not die!
+            if time.time() - t_start < 2.5:
+                print("\n=================================================================")
+                print("  PATIRAJ MOBILE REPAIR SHOP - APPLICATION IS ACTIVE")
+                print("  URL: http://127.0.0.1:5000")
+                print("  Keep this window open while using the software.")
+                print("  Press Ctrl+C to close.")
+                print("=================================================================\n")
+                try:
+                    while True:
+                        time.sleep(1)
+                except KeyboardInterrupt:
+                    print("\n[*] Exiting Patiraj Mobile Repair Shop...")
         else:
+            print(f"[*] Opening Patiraj Mobile Repair Shop in default browser: {url}")
             webbrowser.open(url)
+            print("\n=================================================================")
+            print("  PATIRAJ MOBILE REPAIR SHOP - APPLICATION IS ACTIVE")
+            print("  URL: http://127.0.0.1:5000")
+            print("  Keep this window open while using the software.")
+            print("  Press Ctrl+C to close.")
+            print("=================================================================\n")
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\n[*] Exiting Patiraj Mobile Repair Shop...")
