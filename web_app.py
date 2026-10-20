@@ -2424,7 +2424,6 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       if (listDiv) listDiv.style.display = 'none';
     }
 
-    let customerLookupTimeout = null;
     async function onCustomerPhoneOrNameInput() {
       clearTimeout(customerLookupTimeout);
       customerLookupTimeout = setTimeout(async () => {
