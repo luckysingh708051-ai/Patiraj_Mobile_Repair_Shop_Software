@@ -614,16 +614,9 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <button class="btn-header" onclick="toggleLanguage()" id="header-lang-btn" title="Switch Language">
         <span>🌐</span><span class="btn-label" id="header-lang-label">EN</span>
       </button>
-      <button class="btn-header" onclick="switchTab('settings')" title="Settings">
+      <button class="btn-header" onclick="switchTab('settings')" id="header-settings-btn" title="Settings">
         <span>⚙️</span><span class="btn-label" data-i18n="nav_settings">Settings</span>
       </button>
-      <a href="/api/backup/download" class="btn-header" title="Download SQLite database backup">
-        <span>💾</span><span class="btn-label" data-i18n="btn_backup">Backup</span>
-      </a>
-      <div class="user-pill">
-        <span>👤 {{ username }}<span class="user-role-label"> ({{ role }})</span></span>
-        <span onclick="confirmLogout()" class="btn-logout" title="Sign Out" data-i18n="btn_logout">Exit</span>
-      </div>
     </div>
   </header>
 
@@ -1335,7 +1328,22 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           </div>
         </div>
 
-        <!-- Card 4: Shop & Billing Details -->
+        <!-- Card 4: Database Backup & Restore -->
+        <div class="settings-card">
+          <h3 data-i18n="settings_backup_heading">💾 Database Backup & Safety</h3>
+          <p style="font-size:0.8rem; color:var(--muted); margin-bottom:14px;" data-i18n="settings_backup_sub">Download a complete copy of all your inventory, customers, bills, and repair records, or restore from a backup file.</p>
+          
+          <div style="display:flex; flex-direction:column; gap:10px;">
+            <a href="/api/backup/download" class="btn-primary" style="padding:10px 14px; text-decoration:none; display:flex; align-items:center; justify-content:center; gap:8px;">
+              <span>💾</span> <span data-i18n="settings_download_backup_btn">Download Full Backup (.db)</span>
+            </a>
+            <button type="button" class="btn-secondary" onclick="openRestoreModal()" style="padding:10px 14px; display:flex; align-items:center; justify-content:center; gap:8px;">
+              <span>📥</span> <span data-i18n="settings_restore_backup_btn">Restore from Backup</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Card 5: Shop & Billing Details -->
         <div class="settings-card" style="grid-column: 1 / -1;">
           <h3 data-i18n="settings_shop_info_heading">🏪 Shop & Invoice Configuration</h3>
           <p style="font-size:0.8rem; color:var(--muted); margin-bottom:14px;" data-i18n="settings_shop_info_sub">These details appear on all printed and shared customer invoices.</p>
@@ -2043,6 +2051,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         lbl_confirm_pass: "Confirm New Password:",
         btn_update_pass: "Update Password",
         btn_logout_setting: "🚪 Logout of Application",
+        settings_backup_heading: "💾 Database Backup & Safety",
+        settings_backup_sub: "Download a complete copy of all your inventory, customers, bills, and repair records, or restore from a backup file.",
+        settings_download_backup_btn: "Download Full Backup (.db)",
+        settings_restore_backup_btn: "Restore Database from File",
         shop_settings_title: "🏪 Shop Profile & Invoice Details",
         lbl_shop_name: "Shop Name:",
         lbl_shop_phone: "Phone / Mobile Number:",
@@ -2163,6 +2175,10 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         lbl_confirm_pass: "नया पासवर्ड पुनः दर्ज करें:",
         btn_update_pass: "पासवर्ड अपडेट करें",
         btn_logout_setting: "🚪 सॉफ्टवेयर से लॉगआउट करें",
+        settings_backup_heading: "💾 डेटाबेस बैकअप और सुरक्षा",
+        settings_backup_sub: "अपने सभी इन्वेंट्री, ग्राहक, बिल और रिपेयर रिकॉर्ड्स की बैकअप फ़ाइल डाउनलोड करें या रीस्टोर करें।",
+        settings_download_backup_btn: "संपूर्ण बैकअप डाउनलोड करें (.db)",
+        settings_restore_backup_btn: "फ़ाइल से डेटाबेस रीस्टोर करें",
         shop_settings_title: "🏪 दुकान की जानकारी और इनवॉइस सेटिंग्स",
         lbl_shop_name: "दुकान का नाम:",
         lbl_shop_phone: "फोन / मोबाइल नंबर:",

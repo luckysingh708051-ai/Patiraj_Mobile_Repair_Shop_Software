@@ -2663,6 +2663,7 @@ if __name__ == "__main__":
         print("  Status:     Server is running smoothly.")
         print("  NOTE: Keep this window open while using the software.")
         print("  Press Ctrl+C to close.")
+        
         print("=================================================================\n")
         try:
             while True:
